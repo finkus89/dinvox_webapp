@@ -39,8 +39,19 @@ function AuthCallbackInner() {
       const { error } = await supabase.auth.exchangeCodeForSession(code);
 
       if (error) {
+        // Si hay error, verificamos si de todos modos ya hay usuario autenticado
+        const { data: userData } = await supabase.auth.getUser();
+
+        if (userData?.user) {
+          // El correo ya estaba confirmado / sesión válida
+          setStatusMessage("Tu correo ya estaba confirmado. Ya puedes iniciar sesión.");
+          setLoading(false);
+          return;
+        }
+
+        // Si no hay usuario, ahora sí mostramos error real
         setStatusMessage(
-          "Hubo un error confirmando tu correo. Intenta de nuevo."
+          "Hubo un problema confirmando tu correo. El enlace puede haber expirado. Pide un nuevo correo desde la pantalla de inicio de sesión."
         );
         setLoading(false);
         return;
