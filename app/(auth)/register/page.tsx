@@ -135,15 +135,19 @@ export default function RegisterPage() {
       setErrorTerms("Debes aceptar los términos y condiciones.");
       return;
     }
-
-
     // ======================================================
     // 1) CREAR USUARIO EN SUPABASE AUTH
+    //    + indicar a dónde redirigir el enlace del correo
     // ======================================================
+    const origin = window.location.origin; // ej: http://localhost:3000 o https://dinvox-webapp.vercel.app
+
     const { data: authData, error: authError } =
       await supabase.auth.signUp({
         email: normalizedEmail,
         password,
+        options: {
+          emailRedirectTo: `${origin}/auth/callback`,
+        },
       });
 
     if (authError) {
