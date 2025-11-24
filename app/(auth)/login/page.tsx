@@ -12,7 +12,6 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
 
 export default function LoginPage() {
-
   // =====================================================
   // ESTADOS PARA LOGIN + VALIDACIONES
   // =====================================================
@@ -75,13 +74,54 @@ export default function LoginPage() {
     });
 
     if (error) {
-      // No mostramos el error crudo de Supabase, solo algo amable
-      setErrorGeneral("Correo o contraseña incorrectos.");
+      // Si el error viene por correo no confirmado, avisamos explícito
+      const msg = error.message?.toLowerCase() ?? "";
+
+      if (msg.includes("email not confirmed") || msg.includes("confirm your email")) {
+        setErrorGeneral("Debes confirmar tu correo antes de iniciar sesión. Revisa tu bandeja de entrada.");
+      } else {
+        // Mensaje genérico para credenciales incorrectas
+        setErrorGeneral("Correo o contraseña incorrectos.");
+      }
+
       return;
     }
 
-    // Si todo OK → redirigir al dashboard
-    router.push("/dashboard");
+    // Si login fue exitoso, obtenemos el usuario autenticado
+    const user = data.user;
+    if (!user) {
+      setErrorGeneral("No pudimos obtener tu usuario. Intenta nuevamente.");
+      return;
+    }
+
+    // ==========================================================
+    // 1) CONSULTAR PERFIL EN TABLA public.users
+    //    para saber si ya tiene telegram_chat_id
+    // ==========================================================
+    const { data: profile, error: profileError } = await supabase
+      .from("users")
+      .select("telegram_chat_id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      // Si algo falla al leer el perfil, no bloqueamos al usuario:
+      // lo mandamos al dashboard como fallback y luego lo depuramos.
+      console.error("Error cargando perfil de usuario:", profileError);
+      router.push("/dashboard");
+      return;
+    }
+
+    // ==========================================================
+    // 2) DECISIÓN DE RUTA:
+    //    - Si NO tiene telegram_chat_id → conectar Telegram
+    //    - Si SÍ tiene telegram_chat_id → dashboard
+    // ==========================================================
+    if (!profile || !profile.telegram_chat_id) {
+      router.push("/connect-telegram");
+    } else {
+      router.push("/dashboard");
+    }
   };
 
   return (
@@ -120,14 +160,8 @@ export default function LoginPage() {
         </p>
 
         {/* FORMULARIO */}
-        {/* ============================================
-            AGREGAMOS onSubmit={handleLogin}
-            ============================================ */}
         <form className="space-y-4" onSubmit={handleLogin}>
-
-          {/* ===========================
-              EMAIL
-             =========================== */}
+          {/* EMAIL */}
           <input
             type="text"
             placeholder="Correo o usuario"
@@ -144,9 +178,7 @@ export default function LoginPage() {
             <p className="text-red-400 text-xs mt-1">{errorEmail}</p>
           )}
 
-          {/* ===========================
-              CONTRASEÑA
-             =========================== */}
+          {/* CONTRASEÑA */}
           <input
             type="password"
             placeholder="Contraseña"
@@ -163,9 +195,7 @@ export default function LoginPage() {
             <p className="text-red-400 text-xs mt-1">{errorPassword}</p>
           )}
 
-          {/* ===========================
-              ERROR GENERAL (LOGIN)
-             =========================== */}
+          {/* ERROR GENERAL (LOGIN) */}
           {errorGeneral && (
             <p className="text-red-400 text-xs mt-2 text-center">
               {errorGeneral}
@@ -176,13 +206,13 @@ export default function LoginPage() {
           <button
             type="submit"
             className="
-                  w-full rounded-xl py-3 font-medium
-                      bg-gradient-to-r from-brand-700 to-brand-500
-                      text-white
-                      shadow-lg shadow-black/20
-                      hover:from-brand-600 hover:to-brand-400
-                      transition
-              "
+              w-full rounded-xl py-3 font-medium
+              bg-gradient-to-r from-brand-700 to-brand-500
+              text-white
+              shadow-lg shadow-black/20
+              hover:from-brand-600 hover:to-brand-400
+              transition
+            "
           >
             Iniciar sesión
           </button>
