@@ -3,8 +3,87 @@
 "use client";
 
 import Image from "next/image";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+// ===========================
+// Importar cliente Supabase
+// ===========================
+import { createClient } from "@/lib/supabase/browser";
 
 export default function LoginPage() {
+
+  // =====================================================
+  // ESTADOS PARA LOGIN + VALIDACIONES
+  // =====================================================
+  const [email, setEmail] = useState("");           // email normalizado
+  const [password, setPassword] = useState("");     // contraseña
+  const [errorEmail, setErrorEmail] = useState(""); // error bajo input email
+  const [errorPassword, setErrorPassword] = useState(""); // error bajo input pass
+  const [errorGeneral, setErrorGeneral] = useState("");   // error general
+  const router = useRouter();
+
+  // =====================================================
+  // Función para limpiar errores al escribir
+  // =====================================================
+  const clearErrors = () => {
+    setErrorEmail("");
+    setErrorPassword("");
+    setErrorGeneral("");
+  };
+
+  // =====================================================
+  // MANEJAR LOGIN
+  // =====================================================
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearErrors();
+
+    // Normalizar email
+    const cleanEmail = email.trim().toLowerCase();
+
+    // ------------------------
+    // VALIDAR EMAIL
+    // ------------------------
+    if (!cleanEmail) {
+      setErrorEmail("El correo es obligatorio.");
+      return;
+    }
+
+    const emailRegex = /\S+@\S+\.\S+/;
+    if (!emailRegex.test(cleanEmail)) {
+      setErrorEmail("Correo inválido.");
+      return;
+    }
+
+    // ------------------------
+    // VALIDAR CONTRASEÑA
+    // ------------------------
+    if (!password) {
+      setErrorPassword("La contraseña es obligatoria.");
+      return;
+    }
+
+    // ------------------------
+    // SUPABASE LOGIN
+    // ------------------------
+    const supabase = createClient();
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+
+    if (error) {
+      // No mostramos el error crudo de Supabase, solo algo amable
+      setErrorGeneral("Correo o contraseña incorrectos.");
+      return;
+    }
+
+    // Si todo OK → redirigir al dashboard
+    router.push("/dashboard");
+  };
+
   return (
     <div className="min-h-screen w-full flex items-center justify-center px-4">
       {/* Tarjeta */}
@@ -41,18 +120,57 @@ export default function LoginPage() {
         </p>
 
         {/* FORMULARIO */}
-        <form className="space-y-4">
+        {/* ============================================
+            AGREGAMOS onSubmit={handleLogin}
+            ============================================ */}
+        <form className="space-y-4" onSubmit={handleLogin}>
+
+          {/* ===========================
+              EMAIL
+             =========================== */}
           <input
             type="text"
             placeholder="Correo o usuario"
             className="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/40"
+            value={email}
+            onChange={(e) => {
+              clearErrors();
+              setEmail(e.target.value);
+            }}
           />
 
+          {/* Error bajo email */}
+          {errorEmail && (
+            <p className="text-red-400 text-xs mt-1">{errorEmail}</p>
+          )}
+
+          {/* ===========================
+              CONTRASEÑA
+             =========================== */}
           <input
             type="password"
             placeholder="Contraseña"
             className="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/40"
+            value={password}
+            onChange={(e) => {
+              clearErrors();
+              setPassword(e.target.value);
+            }}
           />
+
+          {/* Error bajo password */}
+          {errorPassword && (
+            <p className="text-red-400 text-xs mt-1">{errorPassword}</p>
+          )}
+
+          {/* ===========================
+              ERROR GENERAL (LOGIN)
+             =========================== */}
+          {errorGeneral && (
+            <p className="text-red-400 text-xs mt-2 text-center">
+              {errorGeneral}
+            </p>
+          )}
 
           {/* BOTÓN PRINCIPAL */}
           <button
