@@ -1,0 +1,45 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 64 64"
+  fill="none"
+>
+  <!-- Círculo exterior -->
+  <circle
+    cx="32"
+    cy="32"
+    r="30"
+    fill="#0A2926"
+    stroke="#0FAE96"
+    stroke-width="3"
+  />
+
+  <!-- Barra izquierda (centrada) -->
+  <rect
+    x="18"
+    y="22"
+    width="8"
+    height="22"
+    rx="2.8"
+    fill="#0FAE96"
+  />
+
+  <!-- Barra central (centrada) -->
+  <rect
+    x="28"
+    y="14"
+    width="8"
+    height="30"
+    rx="2.8"
+    fill="#34F5C5"
+  />
+
+  <!-- Barra derecha (centrada) -->
+  <rect
+    x="38"
+    y="18"
+    width="8"
+    height="26"
+    rx="2.8"
+    fill="#0FAE96"
+  />
+</svg>

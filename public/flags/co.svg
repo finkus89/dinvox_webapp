@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3 2">
+  <!-- Amarillo (mitad superior) -->
+  <rect width="3" height="1" y="0" fill="#FCD116" />
+  <!-- Azul (un cuarto) -->
+  <rect width="3" height="0.5" y="1" fill="#003893" />
+  <!-- Rojo (un cuarto) -->
+  <rect width="3" height="0.5" y="1.5" fill="#CE1126" />
+</svg>
