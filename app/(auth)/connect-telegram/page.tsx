@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
+import { useRouter } from "next/navigation"; // 🆕 Router para redirigir al dashboard
 
 // ⚠️ IMPORTANTE: cambia esto por el username real de tu bot
 const TELEGRAM_BOT_USERNAME = "DinvoxBot"; // ej: "dinvox_bot"
@@ -27,6 +28,8 @@ export default function ConnectTelegramPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [alreadyConnected, setAlreadyConnected] = useState(false);
+
+  const router = useRouter(); // 🆕 Para navegar a /dashboard
 
   useEffect(() => {
     const run = async () => {
@@ -77,6 +80,56 @@ export default function ConnectTelegramPage() {
 
     run();
   }, []);
+
+  // 🆕 Efecto adicional: hacer polling periódico hasta que exista telegram_chat_id
+  useEffect(() => {
+    // Si aún está cargando o hubo error, no hacemos nada
+    if (loading || errorMessage) return;
+
+    const supabase = createClient();
+
+    // Si YA está conectado (por ejemplo, el usuario vuelve a esta página),
+    // lo mandamos directo al dashboard y no arrancamos el intervalo.
+    if (alreadyConnected) {
+      router.push("/dashboard");
+      return;
+    }
+
+    // Intervalo para revisar cada X segundos si ya se guardó telegram_chat_id
+    const intervalId = setInterval(async () => {
+      // 1) Obtener usuario actual de Supabase Auth
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user) {
+        // Si por algún motivo ya no hay sesión, detenemos el polling
+        clearInterval(intervalId);
+        return;
+      }
+
+      // 2) Consultar de nuevo la tabla users para ver si ya tiene telegram_chat_id
+      const { data: profile, error: profileError } = await supabase
+        .from("users")
+        .select("telegram_chat_id")
+        .eq("auth_user_id", userData.user.id)
+        .maybeSingle<UserProfileRow>();
+
+      if (profileError || !profile) {
+        // Si hay error o no hay perfil, no redirigimos, pero seguimos intentando
+        return;
+      }
+
+      if (profile.telegram_chat_id) {
+        // ✅ Se detectó conexión con Telegram
+        clearInterval(intervalId);
+        setAlreadyConnected(true);
+        router.push("/dashboard");
+      }
+    }, 4000); // cada 4 segundos (puedes ajustar el intervalo si lo necesitas)
+
+    // Limpieza del intervalo cuando desmonta el componente o cambian dependencias
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [alreadyConnected, loading, errorMessage, router]);
 
   // Construir link al bot solo si hay token y username
   const telegramLink =

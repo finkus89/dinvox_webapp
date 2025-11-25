@@ -117,11 +117,11 @@ export default function LoginPage() {
     //    - Si NO tiene telegram_chat_id → conectar Telegram
     //    - Si SÍ tiene telegram_chat_id → dashboard
     // ==========================================================
-    if (!profile || !profile.telegram_chat_id) {
-      router.push("/connect-telegram");
-    } else {
-      router.push("/dashboard");
-    }
+      if (!profile || !profile.telegram_chat_id) {
+        router.push("/connect-telegram");
+      } else {
+        router.push("/dashboard");
+      }
   };
 
   return (
