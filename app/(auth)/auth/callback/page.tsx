@@ -19,7 +19,6 @@ import { createClient } from "@/lib/supabase/browser";
 // Componente interno que usa searchParams
 // =====================================
 function AuthCallbackInner() {
-  const supabase = createClient();
   const router = useRouter();
   const params = useSearchParams();
   const code = params.get("code"); // código que manda Supabase
@@ -29,40 +28,54 @@ function AuthCallbackInner() {
 
   useEffect(() => {
     const processCode = async () => {
+      // 🆕 Crear el cliente DENTRO del efecto
+      const supabase = createClient();
+
       if (!code) {
         setStatusMessage("Código inválido o ausente.");
         setLoading(false);
         return;
       }
 
-      // Intercambiar code por sesión
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      try {
+        // Intercambiar code por sesión
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
 
-      if (error) {
-        // Si hay error, verificamos si de todos modos ya hay usuario autenticado
-        const { data: userData } = await supabase.auth.getUser();
+        if (error) {
+          // Si hay error, verificamos si de todos modos ya hay usuario autenticado
+          const { data: userData } = await supabase.auth.getUser();
 
-        if (userData?.user) {
-          // El correo ya estaba confirmado / sesión válida
-          setStatusMessage("Tu correo ya estaba confirmado. Ya puedes iniciar sesión.");
+          if (userData?.user) {
+            // El correo ya estaba confirmado / sesión válida
+            setStatusMessage(
+              "Tu correo ya estaba confirmado. Ya puedes iniciar sesión."
+            );
+            setLoading(false);
+            return;
+          }
+
+          // Si no hay usuario, ahora sí mostramos error real
+          setStatusMessage(
+            "Hubo un problema confirmando tu correo. El enlace puede haber expirado. Pide un nuevo correo desde la pantalla de inicio de sesión."
+          );
           setLoading(false);
           return;
         }
 
-        // Si no hay usuario, ahora sí mostramos error real
+        // ✅ Todo OK
+        setStatusMessage("¡Tu correo ha sido confirmado exitosamente!");
+        setLoading(false);
+      } catch (err) {
+        // 🆕 Catch por si exchangeCodeForSession lanza excepción
         setStatusMessage(
-          "Hubo un problema confirmando tu correo. El enlace puede haber expirado. Pide un nuevo correo desde la pantalla de inicio de sesión."
+          "Ocurrió un error al validar el enlace. Intenta generar un nuevo correo de confirmación."
         );
         setLoading(false);
-        return;
       }
-
-      setStatusMessage("¡Tu correo ha sido confirmado exitosamente!");
-      setLoading(false);
     };
 
     processCode();
-  }, [code, supabase]);
+  }, [code]); // 🆕 solo dependemos de `code`
 
   return (
     <div
