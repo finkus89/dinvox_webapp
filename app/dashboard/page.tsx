@@ -19,6 +19,10 @@ import {
 } from "lucide-react";
 
 import { useState, type ReactNode } from "react";
+// 🔹 Import para cerrar sesión con Supabase (server action)
+import { logOut } from "@/lib/supabase/logout";
+// 🔹 Import para redirigir después de cerrar sesión
+import { useRouter } from "next/navigation";
 
 // 🔹 Tipo de rol (a futuro lo podrás leer desde la sesión)
 type Role = "user" | "admin";
@@ -40,6 +44,13 @@ const MOCK_USER: UserInfo = {
 
 export default function DashboardPage() {
   const user = MOCK_USER;
+  // 🔹 Router para redirigir después del logout
+  const router = useRouter();
+  // 🔹 Función que llama la server action logOut()
+  const handleLogout = async () => {
+    await logOut(); // Cierra sesión en Supabase
+    router.replace("/login"); // Redirige al login
+  };
 
   // Controla si el sidebar móvil está abierto
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -59,6 +70,8 @@ export default function DashboardPage() {
           user={user}
           showCloseButton={false}
           onCloseMobileSidebar={undefined}
+          // 🔹 Le pasamos la función de logout al sidebar
+          onLogout={handleLogout}
         />
       </aside>
 
@@ -79,6 +92,7 @@ export default function DashboardPage() {
               user={user}
               showCloseButton
               onCloseMobileSidebar={() => setIsMobileSidebarOpen(false)}
+              onLogout={handleLogout}
             />
           </div>
         </div>
@@ -195,12 +209,15 @@ interface SidebarContentProps {
   user: UserInfo;
   showCloseButton?: boolean;
   onCloseMobileSidebar?: () => void;
+  // 🔹 Nueva prop para manejar logout desde el Dashboard
+  onLogout?: () => void;
 }
 
 function SidebarContent({
   user,
   showCloseButton = false,
   onCloseMobileSidebar,
+  onLogout,
 }: SidebarContentProps) {
   return (
     <div className="flex flex-col h-full">
@@ -292,6 +309,8 @@ function SidebarContent({
       <div className="p-4 border-t border-white/10">
         <button
           type="button"
+          // 🔹 Evento: ejecutar logout cuando el usuario haga clic
+          onClick={onLogout}
           className="
             w-full inline-flex items-center justify-center gap-2
             rounded-xl bg-white/10 px-3 py-2
