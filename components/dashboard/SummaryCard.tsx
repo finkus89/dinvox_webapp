@@ -83,7 +83,7 @@ export default function SummaryCard() {
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         {/* Título y descripción breve */}
         <div className="flex flex-col gap-2">
-          <h2 className="text-lg font-semibold">Resumen de gastos</h2>
+          <h2 className="text-lg font-semibold">Resumen de gastos (Grafico dummy Temporal)</h2>
           
         </div>
 

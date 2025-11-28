@@ -135,31 +135,64 @@ export default function RegisterPage() {
       setErrorTerms("Debes aceptar los términos y condiciones.");
       return;
     }
+
+        // ============================
+    // VALIDACIÓN — CORREO YA REGISTRADO EN TABLA users
+    // ============================
+    const { data: existingUser, error: existingUserError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    if (existingUserError) {
+      console.error("Error buscando usuario por email:", existingUserError);
+      setErrorGeneral(
+        "Hubo un problema verificando tu correo. Inténtalo nuevamente."
+      );
+      return;
+    }
+
+    if (existingUser) {
+      setErrorEmail(
+        "Este correo ya tiene una cuenta en Dinvox. Intenta iniciar sesión."
+      );
+      return;
+    }
+
     // ======================================================
     // 1) CREAR USUARIO EN SUPABASE AUTH
-    //    + indicar a dónde redirigir el enlace del correo
     // ======================================================
-    const origin = window.location.origin; // ej: http://localhost:3000 o https://dinvox-webapp.vercel.app
+    const origin = window.location.origin;
 
-    const { data: authData, error: authError } =
-      await supabase.auth.signUp({
-        email: normalizedEmail,
-        password,
-        options: {
-          emailRedirectTo: `${origin}/auth/callback`,
-        },
-      });
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: normalizedEmail,
+      password,
+      options: {
+        emailRedirectTo: `${origin}/auth/callback`,
+      },
+    });
 
     if (authError) {
-      setErrorGeneral(
-        authError.message || "No pudimos crear tu cuenta. Intenta otra vez."
-      );
+      const rawMsg = (authError.message || "").toLowerCase();
+
+      if (
+        rawMsg.includes("already registered") ||
+        rawMsg.includes("already exists")
+      ) {
+        // correo ya usado en Auth
+        setErrorEmail("Ya existe una cuenta con este correo. Intenta iniciar sesión.");
+      } else {
+        setErrorGeneral(
+          authError.message || "No se pudo crear la cuenta. Inténtalo de nuevo."
+        );
+      }
       return;
     }
 
     const authUserId = authData.user?.id;
     if (!authUserId) {
-      setErrorGeneral("No pudimos obtener el usuario. Intenta nuevamente.");
+      setErrorGeneral("No se pudo obtener el usuario después del registro.");
       return;
     }
 
@@ -169,7 +202,7 @@ export default function RegisterPage() {
     const { error: insertError } = await supabase
       .from("users")
       .insert({
-        auth_user_id: authUserId,
+        auth_user_id: authUserId, // 👈 FK al usuario de Auth
         email: normalizedEmail,
         name: normalizedName,
         phone_country_code: currentCountry.dialCode,
@@ -177,16 +210,20 @@ export default function RegisterPage() {
         phone_e164,
         channel: "telegram",
         language: currentCountry.defaultLanguage,
-          currency: currentCountry.currency,
+        currency: currentCountry.currency,
         terms_accepted_at: new Date().toISOString(),
       });
 
     if (insertError) {
+      console.error("Error insertando perfil:", insertError);
       setErrorGeneral(
-        "Tu cuenta fue creada en Auth, pero no pudimos guardar tu perfil. Contacta soporte."
+        "Tu cuenta fue creada, pero hubo un problema guardando tu perfil. Intenta iniciar sesión o escríbenos a soporte."
       );
       return;
     }
+
+
+
 
     // ======================================================
     // 3) MOSTRAR MENSAJE DE ÉXITO (sin redirigir)
