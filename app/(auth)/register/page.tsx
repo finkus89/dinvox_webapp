@@ -211,6 +211,7 @@ export default function RegisterPage() {
         channel: "telegram",
         language: currentCountry.defaultLanguage,
         currency: currentCountry.currency,
+        timezone: currentCountry.defaultTimezone,
         terms_accepted_at: new Date().toISOString(),
       });
 
@@ -229,7 +230,7 @@ export default function RegisterPage() {
     // 3) MOSTRAR MENSAJE DE ÉXITO (sin redirigir)
     // ======================================================
     setSuccessMessage(
-      "Tu cuenta fue creada. Te enviamos un correo de confirmación. Por favor revisa tu bandeja y confirma tu cuenta antes de iniciar sesión."
+      "Tu cuenta fue creada. Te enviamos un correo de confirmación. Por favor revisa tu bandeja de entrada o correos no deseados y confirma tu cuenta antes de iniciar sesión."
     );
 
     // Opcional: limpiar campos del formulario

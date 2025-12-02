@@ -20,3 +20,7 @@ body {
   --radius-base: 0.75rem;
 }
 
+/* Hace el icono del date-picker más claro en navegadores WebKit (Chrome, Edge, Safari) */
+input[type="date"].calendar-input::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
