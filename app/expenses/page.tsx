@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import { logOut } from "@/lib/supabase/logout";
 import { useRouter } from "next/navigation";
@@ -34,7 +34,7 @@ function formatName(raw: string): string {
     .join(" ");
 }
 
-export default function ExpensesPage() {
+function ExpensesPageInner() {
   const [dbUser, setDbUser] = useState<DBUser | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -157,5 +157,19 @@ export default function ExpensesPage() {
       
       </div>
     </div>
+  );
+}
+
+export default function ExpensesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="h-screen flex items-center justify-center bg-slate-100 text-slate-700 text-sm">
+          Cargando tabla de gastos…
+        </div>
+      }
+    >
+      <ExpensesPageInner />
+    </Suspense>
   );
 }
