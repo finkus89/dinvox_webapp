@@ -1,11 +1,11 @@
 // webapp/components/filters/CategoryFilter.tsx
-// ------------------------------------------------------
-// Dropdown de categorías (solo UI, sin lógica de datos reales)
-
 "use client";
 
+import { CATEGORIES } from "@/lib/dinvox/categories";
+import type { CategoryId } from "@/lib/dinvox/categories";
+
 interface CategoryFilterProps {
-  value: string;                    // "all" | "comida" | ...
+  value: string | "all";                     // "all" | CategoryId
   onChange: (value: string) => void;
 }
 
@@ -15,6 +15,7 @@ export default function CategoryFilter({ value, onChange }: CategoryFilterProps)
       <label className="block text-xs font-medium text-slate-300 mb-1">
         Categorías
       </label>
+
       <select
         className="
           w-full rounded-xl border border-white/15 bg-slate-900/60
@@ -24,12 +25,15 @@ export default function CategoryFilter({ value, onChange }: CategoryFilterProps)
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
-        {/* Comentario: luego esto se conectará a las categorías reales del usuario */}
+        {/* Opción para ver todo */}
         <option value="all">Todas las categorías</option>
-        <option value="comida">Comida</option>
-        <option value="transporte">Transporte</option>
-        <option value="hogar">Hogar</option>
-        <option value="ocio">Ocio</option>
+
+        {/* Opciones dinámicas reales */}
+        {Object.entries(CATEGORIES).map(([id, cfg]) => (
+          <option key={id} value={id}>
+            {cfg.label}
+          </option>
+        ))}
       </select>
     </div>
   );

@@ -1,23 +1,25 @@
 // webapp/components/dashboard/SummaryCard.tsx
 // ------------------------------------------
-// Tarjeta de resumen del dashboard Dinvox (solo UI, sin datos reales)
-// - Filtros arriba (período + categorías) con <select>
-// - Layout 2 columnas en desktop: Dona (izquierda) + Categorías (derecha)
-// - En móvil se apilan una debajo de la otra
-// - Valores y categorías son placeholders (mock) por ahora
+// Tarjeta de resumen del dashboard Dinvox.
+// - Usa /api/summary para traer total y categorías del período seleccionado.
+// - Muestra filtro de período, dona y barras por categoría.
 
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import CategoryBars from "./CategoryBars";
 import DonutChart from "./DonutChart";
 import PeriodFilter, {
   PeriodFilterValue,
 } from "@/components/filters/PeriodFilter";
 import DateRangePicker from "@/components/filters/DateRangePicker";
+import {
+  PeriodState,
+  formatDateHuman,
+  getPeriodDates,
+} from "@/lib/dinvox/periods";
 
-// 🔹 Mock de resumen consolidado (como lo devolverá el hook real)
-import { MOCK_SUMMARY_DATA } from "@/lib/mock/summary-mock";
 // 🔹 Config de categorías (para obtener el label a partir del id)
 import { CATEGORIES } from "@/lib/dinvox/categories";
 import type { CategoryId } from "@/lib/dinvox/categories";
@@ -42,114 +44,10 @@ const formatAmountShort = (value: number): string =>
     maximumFractionDigits: 0,
   }).format(value)}`;
 
-// 🔹 Estado unificado de período
-//    - type: valor del <select> (today, week, 7d, month, prev_month, range)
-//    - from/to: fechas concretas en formato "YYYY-MM-DD"
-type PeriodState = {
-  type: PeriodFilterValue;
-  from: string;
-  to: string;
-};
-
-// 🔹 Helper: formatea un Date a "YYYY-MM-DD"
-function formatDateISO(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-// 🔹 Helper: formatea "YYYY-MM-DD" a algo legible para el usuario ("01 nov 2025")
-function formatDateHuman(isoDate: string): string {
-  if (!isoDate) return "-";
-
-  const parts = isoDate.split("-");
-  if (parts.length !== 3) return isoDate;
-
-  const [year, month, day] = parts;
-  const date = new Date(Number(year), Number(month) - 1, Number(day));
-
-  if (Number.isNaN(date.getTime())) return isoDate;
-
-  return date.toLocaleDateString("es-CO", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-// 🔹 Helper: calcula from/to según el tipo de período
-//    Nota: por ahora usamos semana actual (lunes–domingo), mes actual y mes anterior
-function getPeriodDates(type: PeriodFilterValue): { from: string; to: string } {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const clampToToday = (date: Date) => {
-    return date > today ? new Date(today) : date;
-  };
-
-  if (type === "today") {
-    const from = formatDateISO(today);
-    const to = formatDateISO(today);
-    return { from, to };
-  }
-
-  if (type === "7d") {
-    const toDate = new Date(today);
-    const fromDate = new Date(today);
-    fromDate.setDate(fromDate.getDate() - 6);
-    return {
-      from: formatDateISO(fromDate),
-      to: formatDateISO(clampToToday(toDate)),
-    };
-  }
-
-  if (type === "week") {
-    const day = today.getDay(); // 0 = domingo, 1 = lunes, ...
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    const monday = new Date(today);
-    monday.setDate(today.getDate() + diffToMonday);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-
-    const toDate = clampToToday(sunday);
-
-    return {
-      from: formatDateISO(monday),
-      to: formatDateISO(toDate),
-    };
-  }
-
-  if (type === "month") {
-    const year = today.getFullYear();
-    const month = today.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-
-    const toDate = clampToToday(lastDay);
-
-    return {
-      from: formatDateISO(firstDay),
-      to: formatDateISO(toDate),
-    };
-  }
-
-  if (type === "prev_month") {
-    const year = today.getFullYear();
-    const month = today.getMonth();
-    const firstPrev = new Date(year, month - 1, 1);
-    const lastPrev = new Date(year, month, 0);
-
-    return {
-      from: formatDateISO(firstPrev),
-      to: formatDateISO(lastPrev),
-    };
-  }
-
-  return { from: "", to: "" };
-}
-
 export default function SummaryCard() {
-  // 🔹 Resumen mock (fallback mientras no haya datos de la API)
-  const summaryMock = MOCK_SUMMARY_DATA;
 
+  // Router para navegar a la tabla de gastos con filtros
+  const router = useRouter();
   // 🔹 Estado de período (UN solo objeto en vez de 3 estados separados)
   //    Por defecto usamos "month" con from/to del mes actual
   const [period, setPeriod] = useState<PeriodState>(() => {
@@ -168,13 +66,8 @@ export default function SummaryCard() {
   );
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-
   // 🔹 Flag de UI: si es rango, mostramos el DateRangePicker
   const isRange = period.type === "range";
-
-  // 🔹 Filtro de categorías (aún no se usa en la lógica, solo reservado)
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-
   // 🔹 Cada vez que cambia el período (type, from, to),
   //    llamamos a /api/summary para traer el resumen real.
   useEffect(() => {
@@ -218,34 +111,74 @@ export default function SummaryCard() {
   // 🔹 Elegimos qué resumen usar en la UI:
   //    - summaryData → datos reales de la API
   //    - summaryMock → fallback temporal mientras tanto
-  const summaryBase = summaryData ?? summaryMock;
+  const summaryBase = summaryData;
+  const total = summaryBase?.total ?? 0;
+  const currency = summaryBase?.currency ?? "COP";
+  const categories = summaryBase?.categories ?? [];
 
   // 🔹 Versión corta del total para la dona (ej: "2.8M")
   const totalShort =
-    summaryBase.total >= 1_000_000
-      ? `${(summaryBase.total / 1_000_000).toFixed(1)}M`
+    total >= 1_000_000
+      ? `${(total / 1_000_000).toFixed(1)}M`
       : new Intl.NumberFormat("es-CO", {
           maximumFractionDigits: 0,
-        }).format(summaryBase.total);
+        }).format(total);
 
   // 🔹 Versión completa para el texto de "Total: ..."
   const totalFormatted = new Intl.NumberFormat("es-CO", {
     maximumFractionDigits: 0,
-  }).format(summaryBase.total);
+  }).format(total);
 
   // 🔹 Array de segmentos para la dona (mismos colores de categorías)
-  const DONUT_SEGMENTS = summaryBase.categories.map((cat) => ({
+  const DONUT_SEGMENTS = categories.map((cat) => ({
     percent: cat.percent,
     color: CATEGORIES[cat.categoryId].color,
   }));
 
   // 🔹 Datos para las barras de categorías, derivados del summary activo
-  const CATEGORY_BARS_DATA = summaryBase.categories.map((cat) => ({
+  const CATEGORY_BARS_DATA = categories.map((cat) => ({
+    categoryId: cat.categoryId,
     name: CATEGORIES[cat.categoryId].label,
     amount: formatAmountShort(cat.amount),
     percent: cat.percent,
     color: CATEGORIES[cat.categoryId].color,
   }));
+
+    // 🔹 Ir a la pantalla de "Tabla de gastos" respetando el período actual
+  function handleGoToExpenses() {
+    const params = new URLSearchParams();
+
+    // Siempre mandamos el tipo de período
+    params.set("periodType", period.type);
+    // Si estamos en "rango", mandamos from/to explícitos
+    if (period.type === "range") {
+      if (period.from) params.set("from", period.from);
+      if (period.to) params.set("to", period.to);
+    }
+
+    const qs = params.toString();
+    router.push(qs ? `/expenses?${qs}` : "/expenses");
+  }
+
+  // 🔹 Ir a la tabla de gastos filtrando por una categoría específica
+  function handleCategoryClick(categoryId: CategoryId) {
+    const params = new URLSearchParams();
+
+    // Tipo de período actual
+    params.set("periodType", period.type);
+
+    // Si estamos en rango, también mandamos from/to
+    if (period.type === "range") {
+      if (period.from) params.set("from", period.from);
+      if (period.to) params.set("to", period.to);
+    }
+
+    // Filtro de categoría
+    params.set("category", categoryId);
+
+    const qs = params.toString();
+    router.push(qs ? `/expenses?${qs}` : "/expenses");
+  }
 
   return (
     <section
@@ -263,7 +196,7 @@ export default function SummaryCard() {
 
           {/* 🔹 Información visible para el usuario sobre el rango usado */}
           <p className="text-xs text-slate-200/85">
-            {summaryBase.total > 0 ? (
+            {total > 0 ? (
               <>
                 Mostrando gastos desde{" "}
                 <span className="font-semibold">
@@ -289,6 +222,13 @@ export default function SummaryCard() {
               </>
             )}
           </p>
+
+          {/* 🔹 Error de summary, si existe */}
+          {summaryError && !isLoadingSummary && (
+            <p className="text-[11px] text-red-100/90">
+              {summaryError}
+            </p>
+          )}
 
           {/* 🔹 Mensaje breve cuando está actualizando datos */}
           {isLoadingSummary && (
@@ -356,36 +296,59 @@ export default function SummaryCard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* COLUMNA IZQUIERDA: DONA + TOTAL */}
-          <div className="lg:col-span-2 flex flex-col gap-4">
-            {/* Placeholder de gráfico de dona */}
+          {/* COLUMNA IZQUIERDA: DONA + TOTAL + BOTÓN (todo en un solo card) */}
+          <div className="lg:col-span-2 flex flex-col">
             <div
               className="
-                w-full flex items-center justify-center
-                rounded-2xl border border-white/10 bg-gradient-to-br from-slate-500 via-slate-600 to-brand-700
+                w-full
+                rounded-2xl border border-white/10
+                bg-gradient-to-br from-slate-500 via-slate-600 to-brand-700
                 px-4 py-6 sm:px-6 sm:py-8
+                flex flex-col items-center gap-4
               "
             >
-              {/* Dona como componente reutilizable */}
+              {/* Dona */}
               <DonutChart
                 totalShort={totalShort}
-                currency={summaryBase.currency}
+                currency={currency}
                 segments={DONUT_SEGMENTS}
               />
-            </div>
 
-            {/* Nota con total exacto */}
-            <div className="text-center mt-2 sm:mt-4">
-              <p className="text-sm sm:text-base text-slate-300 tracking-wide">
-                Gasto Total
-              </p>
-              <p className="text-base sm:text-lg font-bold text-slate-100">
-                {`$${totalFormatted} ${summaryBase.currency}`}
-              </p>
+              {/* Total exacto */}
+              <div className="text-center">
+                <p className="text-sm sm:text-base text-slate-200 tracking-wide">
+                  Gasto Total
+                </p>
+                <p className="text-base sm:text-lg font-bold text-slate-100">
+                  {`$${totalFormatted} ${currency}`}
+                </p>
+              </div>
+
+              {/* Botón dentro del mismo card */}
+              <button
+                type="button"
+                onClick={handleGoToExpenses}
+                className="
+                  mt-1
+                  inline-flex items-center justify-center
+                  rounded-xl border border-emerald-400/60
+                  bg-emerald-500/90 px-4 py-1.5
+                  text-xs sm:text-sm font-semibold text-slate-900
+                  hover:bg-emerald-400 hover:border-emerald-300
+                  transition
+                "
+              >
+                Ver registros
+              </button>
             </div>
           </div>
 
+
           {/* COLUMNA DERECHA: CATEGORÍAS CON BARRAS */}
-          <CategoryBars data={CATEGORY_BARS_DATA} />
+          <CategoryBars
+            data={CATEGORY_BARS_DATA}
+            onCategoryClick={handleCategoryClick}
+          />
         </div>
       </div>
     </section>

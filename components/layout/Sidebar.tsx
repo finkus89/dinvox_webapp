@@ -18,6 +18,8 @@ import {
   X,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { useRouter, usePathname } from "next/navigation";
+
 
 interface SidebarProps {
   // Nombre a mostrar (ya formateado desde el Dashboard, ej: "Carlos Díaz")
@@ -95,8 +97,16 @@ export function Sidebar({
         {/* Grupo: GASTOS */}
         <SidebarSectionLabel label="Gastos" />
 
-        <SidebarItem label="Dashboard" active icon={<Home size={18} />} />
-        <SidebarItem label="Tabla de registros" icon={<Table2 size={18} />} />
+        <SidebarItem
+          label="Dashboard"
+          href="/dashboard"
+          icon={<Home size={18} />}
+        />
+        <SidebarItem
+          label="Tabla de Gastos"
+          href="/expenses"
+          icon={<Table2 size={18} />}
+        />
         <SidebarItem
           label="Análisis avanzado (próx.)"
           icon={<PieChart size={18} />}
@@ -141,28 +151,30 @@ export function Sidebar({
    ============================================================ */
 interface SidebarItemProps {
   label: string;
-  active?: boolean;
+  href?: string;
   icon?: ReactNode;
   disabled?: boolean;
 }
 
-function SidebarItem({
-  label,
-  active = false,
-  icon,
-  disabled = false,
-}: SidebarItemProps) {
+function SidebarItem({ label, href, icon, disabled = false }: SidebarItemProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const isActive = href ? pathname === href : false;
+
+  const handleClick = () => {
+    if (disabled || !href) return;
+    router.push(href);
+  };
+
   return (
     <button
       type="button"
       disabled={disabled}
+      onClick={handleClick}
       className={`
         w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-left transition
-        ${
-          active
-            ? "bg-white/15 text-slate-50 shadow-sm"
-            : "text-slate-200/80 hover:bg-white/10 hover:text-white"
-        }
+        ${isActive ? "bg-white/15 text-slate-50 shadow-sm" : "text-slate-200/80 hover:bg-white/10 hover:text-white"}
         ${disabled ? "opacity-50 cursor-not-allowed" : ""}
       `}
     >
@@ -171,6 +183,8 @@ function SidebarItem({
     </button>
   );
 }
+
+
 
 /* ============================================================
    COMPONENTE: SidebarSectionLabel

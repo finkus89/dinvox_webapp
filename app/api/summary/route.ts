@@ -1,6 +1,24 @@
+/**
+ * API: /api/summary
+ * ------------------
+ * Devuelve el resumen de gastos del usuario autenticado entre un rango de fechas.
+ *
+ * 🔹 Entrada (query params):
+ *     - from : "YYYY-MM-DD"  ← fecha local
+ *     - to   : "YYYY-MM-DD"  ← fecha local
+ *
+ * 🔹 Lógica:
+ *     1. Valida parámetros.
+ *     2. Obtiene usuario autenticado (Supabase Auth).
+ *     3. Lee su perfil interno (tabla users).
+ *     4. Consulta gastos filtrando por expense_date (DATE local).
+ *     5. Agrupa por categoría (columna `category` en la BD).
+ *     6. Calcula total y porcentaje por categoría.
+ *     7. Devuelve estructura lista para SummaryCard.
+ */
+
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { normalizeDateRangeToUTC } from "@/lib/dinvox/date-utils";
 
 export async function GET(request: Request) {
   try {
@@ -8,6 +26,9 @@ export async function GET(request: Request) {
     const from = searchParams.get("from");
     const to = searchParams.get("to");
 
+    // -----------------------------------------
+    // 1. Validación básica de parámetros
+    // -----------------------------------------
     if (!from || !to) {
       return NextResponse.json(
         { error: "Parámetros 'from' y 'to' son requeridos (YYYY-MM-DD)" },
@@ -15,10 +36,14 @@ export async function GET(request: Request) {
       );
     }
 
-    // 1) Cliente de Supabase (server-side)
+    // -----------------------------------------
+    // 2. Cliente Supabase (server-side)
+    // -----------------------------------------
     const supabase = await createClient();
 
-    // 2) Usuario autenticado (Auth)
+    // -----------------------------------------
+    // 3. Usuario autenticado vía Supabase Auth
+    // -----------------------------------------
     const {
       data: { user },
       error: userError,
@@ -31,16 +56,18 @@ export async function GET(request: Request) {
       );
     }
 
-    // 3) Perfil en tabla users:
-    //    - auth_id = user.id (de Supabase Auth)
-    //    - id      = UUID interno que usa expenses.user_id
+    // -----------------------------------------
+    // 4. Perfil del usuario en tabla `users`
+    //    - auth_user_id → id de Auth
+    //    - id → user_id interno para `expenses.user_id`
+    // -----------------------------------------
     const {
       data: profile,
       error: profileError,
     } = await supabase
       .from("users")
       .select("id, currency, timezone")
-      .eq("auth_user_id", user.id)  // 👈 clave: buscamos por auth_id
+      .eq("auth_user_id", user.id)
       .single();
 
     if (profileError || !profile) {
@@ -48,29 +75,28 @@ export async function GET(request: Request) {
         {
           error: "No se pudo obtener el perfil del usuario en 'users'",
           details: profileError?.message ?? null,
-          authUserId: user.id,
         },
         { status: 500 }
       );
     }
 
-    const appUserId: string = profile.id;          // 👈 este es el que usan los gastos
-    const currency: string = profile.currency;
-    const timezone: string = profile.timezone;
+    const appUserId = profile.id;
+    const currency = profile.currency;
+    const timezone = profile.timezone;
 
-    // 4) Normalizar rango local → UTC
-    const { fromUtc, toUtc } = normalizeDateRangeToUTC(from, to, timezone);
-
-    // 5) Consultar expenses del usuario interno (users.id)
+    // -----------------------------------------
+    // 5. Consultar gastos usando expense_date (DATE)
+    //    IMPORTANTE: aquí usamos la columna `category`
+    // -----------------------------------------
     const {
       data: expenses,
       error: expensesError,
     } = await supabase
       .from("expenses")
-      .select("amount, category, created_at")
-      .eq("user_id", appUserId)   // 👈 aquí usamos el id interno, NO el auth
-      .gte("created_at", fromUtc)
-      .lte("created_at", toUtc);
+      .select("amount, category, expense_date")
+      .eq("user_id", appUserId)
+      .gte("expense_date", from)
+      .lte("expense_date", to);
 
     if (expensesError) {
       return NextResponse.json(
@@ -82,54 +108,52 @@ export async function GET(request: Request) {
       );
     }
 
-    const safeExpenses = expenses || [];
+    const safeExpenses = expenses ?? [];
 
-    // 6) Agrupar por categoría y calcular total
-    const categoryTotals = new Map<string, number>();
+    // -----------------------------------------
+    // 6. Agrupar por categoría y calcular total
+    // -----------------------------------------
+    const totals = new Map<string, number>();
     let total = 0;
 
     for (const exp of safeExpenses) {
-      const category = (exp as any).category || "otros";
+      // En BD la columna sigue siendo `category`
+      const categoryId = (exp as any).category ?? "otros";
       const amount = Number((exp as any).amount) || 0;
 
-      if (!categoryTotals.has(category)) {
-        categoryTotals.set(category, 0);
-      }
-      const current = (categoryTotals.get(category) || 0) + amount;
-      categoryTotals.set(category, current);
+      totals.set(categoryId, (totals.get(categoryId) ?? 0) + amount);
       total += amount;
     }
 
-    // 7) Construir array de categorías con amount y percent
-    const categories = Array.from(categoryTotals.entries())
-      .map(([categoryId, amount]) => {
-        const percent = total > 0 ? (amount * 100) / total : 0;
-        return {
-          categoryId,
-          amount,
-          percent: Number(percent.toFixed(2)),
-        };
-      })
+    // -----------------------------------------
+    // 7. Construir arreglo de categorías con porcentaje
+    // -----------------------------------------
+    const categories = Array.from(totals.entries())
+      .map(([categoryId, amount]) => ({
+        categoryId,
+        amount,
+        percent:
+          total > 0 ? Number(((amount * 100) / total).toFixed(2)) : 0,
+      }))
       .sort((a, b) => b.amount - a.amount);
 
-    // 8) Respuesta
-    const responseBody = {
-      total,
-      currency,
-      categories,
-      meta: {
-        from,
-        to,
-        fromUtc,
-        toUtc,
-        timezone,
-        count: safeExpenses.length,
-        appUserId,
-        authUserId: user.id,
+    // -----------------------------------------
+    // 8. Respuesta final para la UI
+    // -----------------------------------------
+    return NextResponse.json(
+      {
+        total,
+        currency,
+        categories,
+        meta: {
+          from,
+          to,
+          timezone,
+          count: safeExpenses.length,
+        },
       },
-    };
-
-    return NextResponse.json(responseBody, { status: 200 });
+      { status: 200 }
+    );
   } catch (err: any) {
     console.error("Error en /api/summary:", err);
     return NextResponse.json(

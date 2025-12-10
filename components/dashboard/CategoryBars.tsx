@@ -2,8 +2,10 @@
 // ---------------------------------------------
 // Lista de categorías con barras horizontales
 // Reutilizable en el dashboard (solo UI, sin lógica de datos)
+import type { CategoryId } from "@/lib/dinvox/categories";
 
 interface CategoryBarItem {
+  categoryId: CategoryId;
   name: string;
   amount: string;  // ej: "$165.000"
   percent: number; // ej: 40
@@ -12,9 +14,10 @@ interface CategoryBarItem {
 
 interface CategoryBarsProps {
   data: CategoryBarItem[];
+  onCategoryClick?: (categoryId: CategoryId) => void;
 }
 
-export default function CategoryBars({ data }: CategoryBarsProps) {
+export default function CategoryBars({ data, onCategoryClick }: CategoryBarsProps) {
   // 🔹 Encontrar el porcentaje máximo para escalar las barras
   const maxPercent =
     data.length > 0
@@ -34,7 +37,12 @@ export default function CategoryBars({ data }: CategoryBarsProps) {
           const relativeWidth = (cat.percent / maxPercent) * 100;
 
           return (
-            <div key={cat.name} className="space-y-1">
+            <button
+              key={cat.categoryId}
+              type="button"
+              onClick={() => onCategoryClick?.(cat.categoryId)}
+              className="w-full text-left space-y-1 rounded-lg hover:bg-slate-900/30 transition cursor-pointer"
+            >
               {/* Primera línea: nombre + monto + porcentaje en la misma fila */}
               <div className="flex items-center justify-between text-[11px] sm:text-xs">
                 <span className="text-slate-200 truncate">{cat.name}</span>
@@ -59,7 +67,7 @@ export default function CategoryBars({ data }: CategoryBarsProps) {
                   }}
                 />
               </div>
-            </div>
+            </button>
           );
         })}
       </div>

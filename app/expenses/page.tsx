@@ -1,5 +1,5 @@
-// src/app/dashboard/page.tsx
-// Dashboard básico de Dinvox (con Header + Sidebar como componentes)
+// src/app/expenses/page.tsx
+// Página "Tabla de gastos" de Dinvox (Header + Sidebar + ExpensesTableCard)
 
 "use client";
 
@@ -7,11 +7,12 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import { logOut } from "@/lib/supabase/logout";
 import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Header from "@/components/layout/Header";
 import { Sidebar } from "@/components/layout/Sidebar";
 import PageContainer from "@/components/layout/PageContainer";
-import SummaryCard from "@/components/dashboard/SummaryCard";
-
+import ExpensesTableCard from "@/components/expenses/ExpensesTableCard";
+import type { PeriodFilterValue } from "@/components/filters/PeriodFilter";
 
 // 🔹 Datos reales del usuario desde la BD
 interface DBUser {
@@ -33,12 +34,25 @@ function formatName(raw: string): string {
     .join(" ");
 }
 
-export default function DashboardPage() {
+export default function ExpensesPage() {
   const [dbUser, setDbUser] = useState<DBUser | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   const supabase = createClient();
   const router = useRouter();
+  // 🔹 Leer filtros iniciales desde la URL (?from=...&to=...&category=...&periodType=...)
+  const searchParams = useSearchParams();
+  const rawPeriodType = searchParams.get("periodType");
+  const allowedPeriodTypes: PeriodFilterValue[] = ["today", "week", "7d", "month", "prev_month", "range",];
+  const periodTypeParam = allowedPeriodTypes.includes(
+  rawPeriodType as PeriodFilterValue
+)
+  ? (rawPeriodType as PeriodFilterValue)
+  : null;
+
+  const fromParam = searchParams.get("from") ?? undefined;
+  const toParam = searchParams.get("to") ?? undefined;
+  const categoryParam = searchParams.get("category") ?? undefined;
 
   // 🔹 Carga de usuario desde Supabase
   useEffect(() => {
@@ -46,7 +60,10 @@ export default function DashboardPage() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      if (!session) return;
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
 
       const { data, error } = await supabase
         .from("users")
@@ -60,7 +77,7 @@ export default function DashboardPage() {
     }
 
     loadUser();
-  }, [supabase]);
+  }, [supabase, router]);
 
   // 🔹 Logout
   const handleLogout = async () => {
@@ -124,13 +141,18 @@ export default function DashboardPage() {
           language={languageDisplay}
           currency={currencyDisplay}
           onOpenSidebar={() => setIsMobileSidebarOpen(true)}
-          title="Dashboard"
+          title="Tabla de gastos"
         />
 
           {/* CONTENIDO PRINCIPAL usando PageContainer */}
           <PageContainer>
-            {/* Tarjeta 1: Resumen (dona + categorias) */}
-            <SummaryCard />
+            <ExpensesTableCard
+              // Filtros iniciales que vienen desde el Dashboard (si existen)
+              initialPeriodType={periodTypeParam ?? undefined}
+              initialFrom={fromParam}
+              initialTo={toParam}
+              initialCategory={categoryParam}
+            />
           </PageContainer>
       
       </div>

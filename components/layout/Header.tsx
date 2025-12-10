@@ -10,13 +10,13 @@
 */
 
 import { Menu } from "lucide-react";
-import { useState } from "react";
 
 interface HeaderProps {
   displayName: string;          // Nombre ya formateado (primera letra mayúscula)
   language?: string | null;     // Código de idioma desde BD
   currency?: string | null;     // Código de moneda desde BD
   onOpenSidebar: () => void;    // Función para abrir sidebar móvil
+  title?: string;               // 🔹 Nuevo: título dinámico ("Dashboard", "Tabla de gastos", etc.)
 }
 
 export default function Header({
@@ -24,10 +24,19 @@ export default function Header({
   language,
   currency,
   onOpenSidebar,
+  title,
 }: HeaderProps) {
   return (
-    <header className="h-16 flex items-center justify-between px-4 sm:px-6 bg-white border-b border-slate-200 shadow-sm">
-      {/* IZQUIERDA: Dashboard + Hola Carlos */}
+    <header
+      className="
+        h-16 min-h-[64px]          /* 🔹 Altura fija del header */
+        flex-shrink-0              /* 🔹 Evita que se comprima en algunos layouts */
+        flex items-center justify-between 
+        px-4 sm:px-6 
+        bg-white border-b border-slate-200 shadow-sm
+      "
+    >
+      {/* IZQUIERDA: Título de página + Hola Carlos */}
       <div className="flex items-center gap-3">
         {/* Botón móvil */}
         <button
@@ -40,7 +49,10 @@ export default function Header({
         </button>
 
         <div>
-          <p className="text-xs sm:text-sm text-slate-500">Dashboard</p>
+          {/* 🔹 Título dinámico: usa el título recibido o "Dashboard" por defecto */}
+          <p className="text-xs sm:text-sm text-slate-500">
+            {title || "Dashboard"}
+          </p>
 
           <h1 className="text-base sm:text-lg font-semibold text-slate-900">
             Hola, {displayName.split(" ")[0]}
@@ -63,11 +75,13 @@ export default function Header({
         </div>
 
         {/* Avatar (primera letra del nombre) */}
-        <div className="
-          w-9 h-9 rounded-full bg-slate-200
-          flex items-center justify-center
-          text-xs font-semibold text-slate-600
-        ">
+        <div
+          className="
+            w-9 h-9 rounded-full bg-slate-200
+            flex items-center justify-center
+            text-xs font-semibold text-slate-600
+          "
+        >
           {displayName.charAt(0).toUpperCase()}
         </div>
       </div>
