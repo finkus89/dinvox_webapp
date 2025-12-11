@@ -136,7 +136,7 @@ export default function RegisterPage() {
       return;
     }
 
-        // ============================
+    // ============================
     // VALIDACIÓN — CORREO YA REGISTRADO EN TABLA users
     // ============================
     const { data: existingUser, error: existingUserError } = await supabase
@@ -170,6 +170,17 @@ export default function RegisterPage() {
       password,
       options: {
         emailRedirectTo: `${origin}/auth/callback`,
+        data: {   // 👈 AQUÍ guardamos el perfil en user_metadata
+          name: normalizedName,
+          phone_country_code: currentCountry.dialCode,
+          phone_national: cleanPhone,
+          phone_e164,
+          channel: "telegram",
+          language: currentCountry.defaultLanguage,
+          currency: currentCountry.currency,
+          timezone: currentCountry.defaultTimezone,
+          terms_accepted_at: new Date().toISOString(),
+        },
       },
     });
 
@@ -195,36 +206,6 @@ export default function RegisterPage() {
       setErrorGeneral("No se pudo obtener el usuario después del registro.");
       return;
     }
-
-    // ======================================================
-    // 2) INSERTAR PERFIL EXTENDIDO EN TABLA public.users
-    // ======================================================
-    const { error: insertError } = await supabase
-      .from("users")
-      .insert({
-        auth_user_id: authUserId, // 👈 FK al usuario de Auth
-        email: normalizedEmail,
-        name: normalizedName,
-        phone_country_code: currentCountry.dialCode,
-        phone_national: cleanPhone,
-        phone_e164,
-        channel: "telegram",
-        language: currentCountry.defaultLanguage,
-        currency: currentCountry.currency,
-        timezone: currentCountry.defaultTimezone,
-        terms_accepted_at: new Date().toISOString(),
-      });
-
-    if (insertError) {
-      console.error("Error insertando perfil:", insertError);
-      setErrorGeneral(
-        "Tu cuenta fue creada, pero hubo un problema guardando tu perfil. Intenta iniciar sesión o escríbenos a soporte."
-      );
-      return;
-    }
-
-
-
 
     // ======================================================
     // 3) MOSTRAR MENSAJE DE ÉXITO (sin redirigir)

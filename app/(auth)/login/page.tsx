@@ -95,6 +95,51 @@ export default function LoginPage() {
     }
 
     // ==========================================================
+    // 0) ASEGURAR QUE EXISTA PERFIL EN public.users (SOLO SI NO EXISTE)
+    // ==========================================================
+    try {
+      // ¿Ya hay fila en users para este auth_user_id?
+      const { data: existingProfile, error: existingError } = await supabase
+        .from("users")
+        .select("id")
+        .eq("auth_user_id", user.id)
+        .maybeSingle();
+
+      if (existingError) {
+        console.error("Error buscando perfil existente:", existingError);
+        // no bloqueamos el login por esto
+      }
+
+      if (!existingProfile) {
+        // No existe perfil -> lo creamos UNA sola vez usando user_metadata
+        const meta: any = user.user_metadata || {};
+
+        const { error: insertError } = await supabase.from("users").insert({
+          auth_user_id: user.id,
+          email: user.email ?? cleanEmail,
+          name: meta.name ?? null,
+          phone_country_code: meta.phone_country_code ?? null,
+          phone_national: meta.phone_national ?? null,
+          phone_e164: meta.phone_e164 ?? null,
+          channel: meta.channel ?? "telegram",
+          language: meta.language ?? null,
+          currency: meta.currency ?? null,
+          timezone: meta.timezone ?? null,
+          terms_accepted_at:meta.terms_accepted_at ?? new Date().toISOString(),
+        });
+
+        if (insertError) {
+          console.error("Error creando perfil en users:", insertError);
+          // tampoco bloqueamos el login
+        }
+      }
+    } catch (e) {
+      console.error("Error inesperado asegurando perfil:", e);
+      // no bloqueamos el login
+    }
+
+
+    // ==========================================================
     // 1) CONSULTAR PERFIL EN TABLA public.users
     //    para saber si ya tiene telegram_chat_id
     // ==========================================================
