@@ -30,12 +30,15 @@ export default function LoginPage() {
     setErrorPassword("");
     setErrorGeneral("");
   };
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // =====================================================
   // MANEJAR LOGIN
   // =====================================================
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     clearErrors();
 
     // Normalizar email
@@ -167,6 +170,7 @@ export default function LoginPage() {
       } else {
         router.push("/dashboard");
       }
+    setIsSubmitting(false);
   };
 
   return (
@@ -209,6 +213,7 @@ export default function LoginPage() {
           {/* EMAIL */}
           <input
             type="text"
+            maxLength={254}
             placeholder="Correo o usuario"
             className="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/40"
             value={email}
@@ -226,6 +231,7 @@ export default function LoginPage() {
           {/* CONTRASEÑA */}
           <input
             type="password"
+            maxLength={128}
             placeholder="Contraseña"
             className="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/40"
             value={password}
@@ -250,16 +256,18 @@ export default function LoginPage() {
           {/* BOTÓN PRINCIPAL */}
           <button
             type="submit"
-            className="
+            disabled={isSubmitting}
+            className={`
               w-full rounded-xl py-3 font-medium
               bg-gradient-to-r from-brand-700 to-brand-500
               text-white
               shadow-lg shadow-black/20
               hover:from-brand-600 hover:to-brand-400
               transition
-            "
+              ${isSubmitting ? "opacity-70 cursor-not-allowed" : ""}
+            `}
           >
-            Iniciar sesión
+            {isSubmitting ? "Ingresando..." : "Iniciar sesión"}
           </button>
         </form>
 

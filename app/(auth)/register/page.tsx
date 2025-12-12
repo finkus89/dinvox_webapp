@@ -36,6 +36,7 @@ export default function RegisterPage() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isCountryOpen, setIsCountryOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
 
   // ================================
@@ -64,6 +65,8 @@ export default function RegisterPage() {
   //   FUNCIÓN PRINCIPAL DE REGISTRO (maneja TODO)
   // ======================================================
   const handleRegister = async () => {
+    if (isSubmitting) return;
+     setIsSubmitting(true);
     clearErrors();
 
     // ============================
@@ -136,30 +139,6 @@ export default function RegisterPage() {
       return;
     }
 
-    // ============================
-    // VALIDACIÓN — CORREO YA REGISTRADO EN TABLA users
-    // ============================
-    const { data: existingUser, error: existingUserError } = await supabase
-      .from("users")
-      .select("id")
-      .eq("email", normalizedEmail)
-      .maybeSingle();
-
-    if (existingUserError) {
-      console.error("Error buscando usuario por email:", existingUserError);
-      setErrorGeneral(
-        "Hubo un problema verificando tu correo. Inténtalo nuevamente."
-      );
-      return;
-    }
-
-    if (existingUser) {
-      setErrorEmail(
-        "Este correo ya tiene una cuenta en Dinvox. Intenta iniciar sesión."
-      );
-      return;
-    }
-
     // ======================================================
     // 1) CREAR USUARIO EN SUPABASE AUTH
     // ======================================================
@@ -221,6 +200,8 @@ export default function RegisterPage() {
     setPassword2("");
     setPhoneNumber("");
     setTermsAccepted(false);
+
+    setIsSubmitting(false);
   };
 
   return (
@@ -307,6 +288,7 @@ export default function RegisterPage() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200"
                 placeholder="Ej. Carlos Díaz"
                 value={name}
+                maxLength={80}
                 onChange={(e) => {
                   clearErrors();
                   setName(e.target.value);
@@ -329,6 +311,7 @@ export default function RegisterPage() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200"
                 placeholder="ejemplo@correo.com"
                 value={email}
+                maxLength={254}
                 onChange={(e) => {
                   clearErrors();
                   setEmail(e.target.value);
@@ -404,6 +387,7 @@ export default function RegisterPage() {
                   className="flex-1 rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200 text-sm"
                   placeholder="300 000 0000"
                   value={phoneNumber}
+                  maxLength={15}
                   onChange={(e) => {
                     clearErrors();
                     setPhoneNumber(e.target.value);
@@ -427,6 +411,7 @@ export default function RegisterPage() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200"
                 placeholder="Mínimo 8 caracteres"
                 value={password}
+                maxLength={128}
                 onChange={(e) => {
                   clearErrors();
                   setPassword(e.target.value);
@@ -449,6 +434,7 @@ export default function RegisterPage() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200"
                 placeholder="Repite la contraseña"
                 value={password2}
+                maxLength={128}
                 onChange={(e) => {
                   clearErrors();
                   setPassword2(e.target.value);
@@ -483,11 +469,11 @@ export default function RegisterPage() {
 
               <span>
                 Acepto los{" "}
-                <a href="/terminos" target="_blank" className="underline text-slate-800">
+                <a href="/legal#terminos" target="_blank" className="underline text-slate-800">
                   Términos y Condiciones
                 </a>{" "}
                 y la{" "}
-                <a href="/privacidad" target="_blank" className="underline text-slate-800">
+                <a href="/legal#privacidad" target="_blank" className="underline text-slate-800">
                   Política de Privacidad
                 </a>.
               </span>
@@ -500,14 +486,16 @@ export default function RegisterPage() {
             {/* Botón principal */}
             <button
               onClick={handleRegister}
-              className="
+              disabled={isSubmitting}
+              className={`
                 w-full rounded-lg py-2.5 font-medium text-white
                 bg-gradient-to-r from-brand-700 to-brand-500
                 hover:from-brand-600 hover:to-brand-400
                 transition
-              "
+                ${isSubmitting ? "opacity-70 cursor-not-allowed" : ""}
+              `}
             >
-              Crear cuenta
+              {isSubmitting ? "Creando cuenta..." : "Crear cuenta"}
             </button>
           </div>
 

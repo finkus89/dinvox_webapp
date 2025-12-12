@@ -1,8 +1,56 @@
+
+//app\(auth)\forgot-password\page.tsx
 "use client";
 
 import Image from "next/image";
+import { useState } from "react";
+import { createClient } from "@/lib/supabase/browser";
+
 
 export default function ForgotPasswordPage() {
+
+  const supabase = createClient();
+
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (loading || sent) return;
+
+    setError(null);
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setError("Escribe tu correo.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const redirectTo = `${window.location.origin}/reset-password`;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        redirectTo,
+      });
+
+      // Importante: NO revelar si existe o no. Si hay error técnico, sí mostramos genérico.
+      if (error) {
+        setError("No se pudo enviar el enlace. Intenta de nuevo.");
+        return;
+      }
+
+      setSent(true);
+    } catch {
+      setError("No se pudo enviar el enlace. Intenta de nuevo.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+
   return (
     // Contenedor que centra la tarjeta — el fondo ya viene desde el layout
     <div className="w-full min-h-screen flex items-center justify-center px-4">
@@ -41,42 +89,65 @@ export default function ForgotPasswordPage() {
         </p>
 
         {/* FORMULARIO */}
-        <form className="space-y-4">
-          <input
-            type="email"
-            placeholder="Correo electrónico"
-            className="
-              w-full rounded-xl border border-white/20 bg-white/10 
-              px-4 py-3 text-white placeholder-white/60
-              focus:outline-none focus:ring-2 focus:ring-white/40
-            "
-          />
+        {!sent ? (
+          <form className="space-y-4" onSubmit={onSubmit}>
+            <input
+              type="email"
+              placeholder="Correo electrónico"
+              className="
+                w-full rounded-xl border border-white/20 bg-white/10 
+                px-4 py-3 text-white placeholder-white/60
+                focus:outline-none focus:ring-2 focus:ring-white/40
+              "
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={loading}
+            />
 
-          {/* BOTÓN */}
-          <button
-            type="submit"
-            className="
-              w-full rounded-xl py-3 font-medium
-              bg-gradient-to-r from-brand-700 to-brand-500
-              text-white
-              shadow-lg shadow-black/20
-              hover:from-brand-600 hover:to-brand-400
-              transition
-            "
-          >
-            Enviar enlace de recuperación
-          </button>
-        </form>
+            {error && (
+              <div className="text-sm text-red-200 bg-red-500/10 border border-red-300/20 rounded-xl px-3 py-2">
+                {error}
+              </div>
+            )}
+            {/* BOTON */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="
+                w-full rounded-xl py-3 font-medium
+                bg-gradient-to-r from-brand-700 to-brand-500
+                text-white
+                shadow-lg shadow-black/20
+                hover:from-brand-600 hover:to-brand-400
+                transition
+                disabled:opacity-60
+              "
+            >
+              {loading ? "Enviando..." : "Enviar enlace de recuperación"}
+            </button>
+          </form>
+        ) : (
+          <div className="space-y-4">
+            {/* Respuesta */}
+            <p className="text-center text-white/80 text-sm">
+              Si el correo existe, te llegará un enlace para restablecer tu contraseña.
+            </p>
+            <p className="text-center text-white/60 text-sm">
+              Revisa spam o promociones. El enlace puede tardar unos minutos.
+            </p>
 
-        {/* ENLACE DE REGRESO */}
-        <div className="mt-6 text-center text-sm text-white/70">
-          <a
-            href="/login"
-            className="underline underline-offset-4 hover:text-white"
-          >
-            Volver a iniciar sesión
-          </a>
-        </div>
+            {/* Redireccion a iniciar sesion */}
+            <div className="pt-2 text-center text-sm text-white/70">
+              <a
+                href="/login"
+                className="underline underline-offset-4 hover:text-white"
+              >
+                Volver a iniciar sesión
+              </a>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

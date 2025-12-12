@@ -1,4 +1,4 @@
-// /api/expenses
+// /api/expenses/route.ts
 // ---------------------------------------------------------
 // Endpoint para obtener los gastos del usuario autenticado.
 //

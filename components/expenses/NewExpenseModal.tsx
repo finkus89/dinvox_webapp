@@ -135,6 +135,9 @@ export default function NewExpenseModal({
     } else if (!Number.isFinite(amountNum) || amountNum <= 0) {
       newErrors.amount = "El monto debe ser un número positivo.";
     }
+    if (form.amount.length > 12) {
+      newErrors.amount = "El monto es demasiado grande.";
+    }
 
     // Nota (opcional, pero limitamos longitud para no exagerar)
     if (form.note.length > 200) {
@@ -303,6 +306,7 @@ export default function NewExpenseModal({
                 step="100"
                 placeholder="Ej: 25000"
                 value={form.amount}
+                maxLength={12}
                 onChange={(e) => handleChange("amount", e.target.value)}
                 className="
                   w-full rounded-xl border border-white/10
@@ -336,7 +340,7 @@ export default function NewExpenseModal({
                 "
               />
               {errors.note && (
-                <p className="text[11px] text-red-200">{errors.note}</p>
+                <p className="text-[11px] text-red-200">{errors.note}</p>
               )}
             </div>
 

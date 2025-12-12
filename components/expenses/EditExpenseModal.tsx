@@ -84,14 +84,25 @@ export default function EditExpenseModal({
     if (!expense) return;
 
      // Validación rápida de fecha futura (igual criterio que NewExpenseModal)
-    if (form.date && form.date > todayStr) {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!form.date || !dateRegex.test(form.date)) {
+      setError("Selecciona una fecha válida.");
+      return;
+    }
+
+    if (form.date > todayStr) {
       setError("La fecha no puede ser futura.");
       return;
     }
 
+
     // Validación simple de categoría
     if (!form.category) {
       setError("Selecciona una categoría válida.");
+      return;
+    }
+    if (!(form.category in CATEGORIES)) {
+      setError("Categoría inválida.");
       return;
     }
 
@@ -99,12 +110,27 @@ export default function EditExpenseModal({
       setIsSaving(true);
       setError(null);
 
-      // Normalizar monto (quitando separadores de miles)
-      const rawAmount = form.amount.replace(/\./g, "").replace(",", ".");
+      // Normalizar monto (quitando separadores de miles y espacios)
+      const rawAmount = form.amount
+        .replace(/\s+/g, "")   // quitar espacios
+        .replace(/\./g, "")    // puntos de miles
+        .replace(",", ".");    // coma a punto
+
       const amountNumber = Number(rawAmount) || 0;
 
+      if (form.amount.length > 12) {
+        setError("El monto es demasiado grande.");
+        setIsSaving(false);
+        return;
+      }
       if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
         setError("El monto debe ser un número positivo.");
+        setIsSaving(false);
+        return;
+      }
+
+      if (form.note.length > 200) {
+        setError("La nota no puede superar 200 caracteres.");
         setIsSaving(false);
         return;
       }
@@ -243,6 +269,7 @@ export default function EditExpenseModal({
                 type="text"
                 placeholder="Ej: 25000"
                 value={form.amount}
+                maxLength={12}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, amount: e.target.value }))
                 }

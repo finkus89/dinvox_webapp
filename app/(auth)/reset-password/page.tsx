@@ -1,10 +1,87 @@
 // Página de restablecimiento de contraseña de Dinvox
+// app\(auth)\reset-password\page.tsx
+// -------------------------------------------------
+// Permite crear una nueva contraseña solo si el usuario
+// llega desde un enlace válido de recuperación (Supabase).
+// Si el enlace es inválido o expiró, bloquea el formulario.
+
 "use client";
 
 import Image from "next/image";
 import Link from "next/link";
 
+// NUEVO: hooks y router
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
+// NUEVO: cliente Supabase (browser)
+import { createClient } from "@/lib/supabase/browser";
+
 export default function ResetPasswordPage() {
+  // NUEVO: inicializar Supabase y router
+  const supabase = createClient();
+  const router = useRouter();
+
+  // NUEVO: estados mínimos
+  const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false); // solo true si hay sesión recovery
+
+  // NUEVO: verificar si existe una sesión válida de recuperación
+  useEffect(() => {
+    const checkRecoverySession = async () => {
+      const { data } = await supabase.auth.getSession();
+
+      if (!data.session) {
+        setError(
+          "El enlace es inválido o ha expirado. Solicita uno nuevo."
+        );
+        setReady(false);
+        return;
+      }
+
+      setReady(true);
+    };
+
+    checkRecoverySession();
+  }, [supabase]);
+
+  // NUEVO: handler del formulario
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (loading || !ready) return;
+
+    setError(null);
+
+    if (password.length < 8) {
+      setError("La contraseña debe tener al menos 8 caracteres.");
+      return;
+    }
+
+    if (password !== password2) {
+      setError("Las contraseñas no coinciden.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+
+      if (error) {
+        setError("No se pudo actualizar la contraseña. Intenta de nuevo.");
+        return;
+      }
+
+      // NUEVO: cerrar sesión recovery y redirigir a login
+      await supabase.auth.signOut();
+      router.replace("/login");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     // Contenedor que centra la tarjeta (el fondo viene del layout (auth))
     <div className="w-full min-h-screen flex items-center justify-center px-4">
@@ -41,8 +118,15 @@ export default function ResetPasswordPage() {
           Ingresa tu nueva contraseña y confírmala para continuar.
         </p>
 
+        {/* NUEVO: mensaje de error general */}
+        {error && (
+          <div className="mb-4 text-sm text-red-200 bg-red-500/10 border border-red-300/20 rounded-xl px-3 py-2 text-center">
+            {error}
+          </div>
+        )}
+
         {/* FORMULARIO */}
-        <form className="space-y-4">
+        <form className="space-y-4" onSubmit={onSubmit}>
           <div>
             <input
               type="password"
@@ -52,6 +136,9 @@ export default function ResetPasswordPage() {
                 px-4 py-3 text-white placeholder-white/60
                 focus:outline-none focus:ring-2 focus:ring-white/40
               "
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={!ready || loading}
             />
           </div>
           <div>
@@ -63,12 +150,16 @@ export default function ResetPasswordPage() {
                 px-4 py-3 text-white placeholder-white/60
                 focus:outline-none focus:ring-2 focus:ring-white/40
               "
+              value={password2}
+              onChange={(e) => setPassword2(e.target.value)}
+              disabled={!ready || loading}
             />
           </div>
 
           {/* BOTÓN PRINCIPAL */}
           <button
             type="submit"
+            disabled={!ready || loading}
             className="
               w-full rounded-xl py-3 font-medium
               bg-gradient-to-r from-brand-700 to-brand-500
@@ -76,9 +167,10 @@ export default function ResetPasswordPage() {
               shadow-lg shadow-black/20
               hover:from-brand-600 hover:to-brand-400
               transition
+              disabled:opacity-60
             "
           >
-            Guardar nueva contraseña
+            {loading ? "Guardando..." : "Guardar nueva contraseña"}
           </button>
         </form>
 
@@ -91,6 +183,18 @@ export default function ResetPasswordPage() {
             Volver a iniciar sesión
           </Link>
         </div>
+
+        {/* NUEVO: acceso rápido si el enlace expiró */}
+        {!ready && (
+          <div className="mt-4 text-center text-sm text-white/60">
+            <Link
+              href="/forgot-password"
+              className="underline underline-offset-4 hover:text-white"
+            >
+              Solicitar un nuevo enlace
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );
