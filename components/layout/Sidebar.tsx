@@ -116,9 +116,15 @@ export function Sidebar({
         {/* Grupo: CUENTA */}
         <SidebarSectionLabel label="Cuenta" />
 
-        <SidebarItem label="Configuración" icon={<Settings size={18} />} />
+        <SidebarItem 
+          label="Configuración" 
+          href="/settings"
+          icon={<Settings size={18} />} 
+        />
+
         <SidebarItem
           label="Ayuda / Cómo usar Dinvox"
+          href="/help"
           icon={<HelpCircle size={18} />}
         />
       </nav>

@@ -26,7 +26,7 @@ export function middleware(req: NextRequest) {
   const publicAuthRoutes = ["/login", "/register"];
 
   // 🔒 Rutas protegidas del dashboard
-  const protectedRoutes = ["/dashboard", "/connect-telegram",  "/expenses"];
+  const protectedRoutes = ["/dashboard", "/connect-telegram",  "/expenses", "/settings", "/help"];
 
   const isPublicAuth = publicAuthRoutes.some((r) =>
     pathname.startsWith(r)
@@ -58,6 +58,8 @@ export const config = {
     "/dashboard/:path*",
     "/connect-telegram/:path*",
     "/expenses/:path*",
+    "/settings/:path*",
+    "/help/:path*",
     "/auth/:path*",
   ],
 };
