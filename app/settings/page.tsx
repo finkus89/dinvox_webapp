@@ -19,8 +19,8 @@ import Header from "@/components/layout/Header";
 import { Sidebar } from "@/components/layout/Sidebar";
 import PageContainer from "@/components/layout/PageContainer";
 import AccountInfoCard from "@/components/settings/AccountInfoCard";
-import { SettingsAccordion } from "@/components/settings/SettingsAccordion";
-import SettingsSection from "@/components/settings/SettingsSection";
+import { Accordion } from "@/components/layout/Accordion";
+import AccordionSection from "@/components/layout/AccordionSection";
 import DeleteAccountCard from "@/components/settings/DeleteAccountCard";
 
 // 🔹 Helpers existentes
@@ -194,8 +194,8 @@ export default function SettingsPage() {
 
         {/* CONTENIDO */}
         <PageContainer>
-        <SettingsAccordion defaultOpenKey="account">
-          <SettingsSection 
+        <Accordion defaultOpenKey="account">
+          <AccordionSection 
             sectionKey="account"
             title="Tu cuenta" 
             icon={<User className="h-5 w-5 text-slate-200" />}
@@ -210,16 +210,16 @@ export default function SettingsPage() {
               country={countryDisplay}
               createdAt={createdAtDisplay}
             />
-          </SettingsSection>
+          </AccordionSection>
 
-          <SettingsSection 
+          <AccordionSection 
             sectionKey="delete" 
             title="Eliminar cuenta" 
             icon={<Trash2 className="h-5 w-5 text-red-300" />}
           >
             <DeleteAccountCard />
-          </SettingsSection>
-        </SettingsAccordion>
+          </AccordionSection>
+        </Accordion>
       </PageContainer>
 
       </div>

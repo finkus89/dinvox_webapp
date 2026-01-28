@@ -1,14 +1,14 @@
-// src/components/settings/SettingsSection.tsx
+// components\layout\AccordionSection.tsx
 // -------------------------------------------
-// Sección colapsable genérica para Settings.
+// Sección colapsable genérica.
 // - UI pura (sin estado interno).
-// - El estado (open/collapse) lo controla SettingsAccordion.
+// - El estado (open/collapse) lo controla Accordion.
 
 "use client";
 
 import { ChevronDown } from "lucide-react";
 
-type SettingsSectionProps = {
+type AccordionSectionProps = {
   sectionKey: string; 
   title: string;
   isOpen?: boolean;
@@ -17,13 +17,13 @@ type SettingsSectionProps = {
   children: React.ReactNode;
 };
 
-export default function SettingsSection({
+export default function AccordionSection({
   title,
   isOpen = false,
   icon,
   onToggle,
   children,
-}: SettingsSectionProps) {
+}: AccordionSectionProps) {
   return (
     <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-slate-700 via-slate-600 to-brand-500 backdrop-blur-xl shadow-xl text-slate-100">
       <button

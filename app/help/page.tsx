@@ -12,12 +12,6 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import PageContainer from "@/components/layout/PageContainer";
 import HelpContent from "@/components/help/HelpContent";
 
-// ...
-
-<PageContainer>
-  <HelpContent />
-</PageContainer>
-
 
 
 // 🔹 Datos reales del usuario desde la BD

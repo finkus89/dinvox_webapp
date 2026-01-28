@@ -1,6 +1,6 @@
-// src/components/settings/SettingsAccordion.tsx
+// components\layout\Accordion.tsx
 // ----------------------------------------------
-// Contenedor de secciones colapsables para Settings.
+// Contenedor de secciones colapsables.
 // - Permite UNA sección abierta a la vez.
 // - Define sección abierta por defecto.
 // - Centraliza el estado del accordion (open / close).
@@ -9,7 +9,7 @@
 
 import { ReactNode, useState } from "react";
 
-type SettingsAccordionProps = {
+type AccordionProps = {
   defaultOpenKey: string;
   children: ReactNode;
 };
@@ -21,10 +21,10 @@ type SectionProps = {
   children: ReactNode;
 };
 
-export function SettingsAccordion({
+export function Accordion({
   defaultOpenKey,
   children,
-}: SettingsAccordionProps) {
+}: AccordionProps) {
   const [openKey, setOpenKey] = useState<string | null>(defaultOpenKey);
 
   return (

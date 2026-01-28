@@ -4,20 +4,21 @@
 
 export type CategoryId =
   | "comida"
-  | "transporte"
-  | "mercado"
-  | "servicios"
-  | "ocio"
-  | "salud"
   | "creditos"
+  | "educacion"
   | "finanzas"
   | "hogar"
   | "mascotas"
+  | "mercado"
+  | "ocio"
+  | "personales"
   | "regalos"
   | "ropa"
-  | "personales"
-  | "educacion"
+  | "salud"
+  | "servicios"
+  | "transporte"
   | "otros";
+
 
 export interface CategoryConfig {
   id: CategoryId;
@@ -26,40 +27,25 @@ export interface CategoryConfig {
 }
 
 export const CATEGORIES: Record<CategoryId, CategoryConfig> = {
+  personales: {
+    id: "personales",
+    label: "Artículos personales",
+    color: "#a3e635",
+  },
   comida: {
     id: "comida",
     label: "Comida",
     color: "#f97373",
   },
-  transporte: {
-    id: "transporte",
-    label: "Transporte",
-    color: "#fb923c",
-  },
-  mercado: {
-    id: "mercado",
-    label: "Mercado",
-    color: "#facc15",
-  },
-  servicios: {
-    id: "servicios",
-    label: "Servicios",
-    color: "#22c55e",
-  },
-  ocio: {
-    id: "ocio",
-    label: "Ocio",
-    color: "#2dd4bf",
-  },
-  salud: {
-    id: "salud",
-    label: "Salud",
-    color: "#38bdf8",
-  },
   creditos: {
     id: "creditos",
     label: "Créditos",
     color: "#6366f1",
+  },
+  educacion: {
+    id: "educacion",
+    label: "Educación",
+    color: "#eab308",
   },
   finanzas: {
     id: "finanzas",
@@ -76,6 +62,16 @@ export const CATEGORIES: Record<CategoryId, CategoryConfig> = {
     label: "Mascotas",
     color: "#f97316",
   },
+  mercado: {
+    id: "mercado",
+    label: "Mercado",
+    color: "#facc15",
+  },
+  ocio: {
+    id: "ocio",
+    label: "Ocio",
+    color: "#2dd4bf",
+  },
   regalos: {
     id: "regalos",
     label: "Regalos",
@@ -86,15 +82,20 @@ export const CATEGORIES: Record<CategoryId, CategoryConfig> = {
     label: "Ropa",
     color: "#10b981",
   },
-  personales: {
-    id: "personales",
-    label: "Artículos personales",
-    color: "#a3e635",
+  salud: {
+    id: "salud",
+    label: "Salud",
+    color: "#38bdf8",
   },
-  educacion: {
-    id: "educacion",
-    label: "Educación",
-    color: "#eab308",
+  servicios: {
+    id: "servicios",
+    label: "Servicios",
+    color: "#22c55e",
+  },
+  transporte: {
+    id: "transporte",
+    label: "Transporte",
+    color: "#fb923c",
   },
   otros: {
     id: "otros",
@@ -102,6 +103,7 @@ export const CATEGORIES: Record<CategoryId, CategoryConfig> = {
     color: "#9ca3af",
   },
 };
+
 
 // 👉 Array útil para mapear opciones, sin orden especial garantizado
 export const CATEGORIES_ARRAY: CategoryConfig[] = Object.values(CATEGORIES);

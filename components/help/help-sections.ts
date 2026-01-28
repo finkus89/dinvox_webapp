@@ -257,6 +257,106 @@ Está pensada para ajustes finos y revisión detallada, complementando el Dashbo
 },
 
 {
+  id: "tercios-del-mes",
+  title: "Tercios del mes",
+  body: `
+Este gráfico divide tu gasto mensual en tres partes iguales de tiempo:
+
+- T1: días 1–10
+- T2: días 11–20
+- T3: días 21–fin de mes
+
+Cada barra muestra cuánto gastaste en ese tramo y qué porcentaje representa sobre el total del mes.
+
+¿Para qué sirve?
+Para entender cuándo se te va la plata, no en qué categoría.
+
+Te ayuda a detectar patrones como:
+- gastar más al inicio del mes,
+- gastar de forma pareja,
+- o concentrar gastos al final.
+
+Cómo leerlo:
+- La barra más alta indica el tercio donde se concentró la mayor parte del gasto.
+- Los porcentajes se calculan sobre el total registrado del mes.
+- Si el mes está en curso, el último tercio puede estar incompleto.
+  `,
+},
+
+{
+  id: "ritmo-del-mes",
+  title: "Ritmo del mes",
+  body: `
+Este gráfico muestra cómo va creciendo tu gasto día a día durante el mes
+y lo compara contra una referencia, cuando existe.
+
+La línea sólida representa tu gasto acumulado real.
+La línea punteada (si aparece) es la referencia esperada.
+
+¿Para qué sirve?
+Para saber si tu gasto va contenido, normal o acelerado en el tiempo.
+
+No mira categorías.
+Mira velocidad.
+
+Cómo funciona el ritmo (R):
+El ritmo compara tu gasto actual contra una referencia.
+
+- R < 0.9 → Gasto contenido
+- R entre 0.9 y 1.1 → Gasto normal
+- R > 1.1 → Gasto acelerado
+
+Ejemplo:
+Un R de 0.66x significa que estás gastando más lento que tu referencia.
+
+¿Qué es la referencia?
+La referencia se calcula usando tu historial reciente:
+- puede ser el mes anterior,
+- o la mediana de los últimos meses disponibles.
+
+Si aún no hay datos suficientes, no se usa referencia.
+
+Cuando no hay referencia:
+Si no hay historial suficiente, el sistema muestra únicamente tu
+promedio diario de gasto hasta la fecha.
+Ese mes se usará luego como base inicial.
+
+Importante:
+Este gráfico no es un presupuesto.
+No te dice cuánto deberías gastar.
+Te muestra si estás acelerando o conteniendo tu gasto en el tiempo.
+  `,
+},
+
+{
+  id: "evolucion-mensual",
+  title: "Evolución mensual",
+  body: `
+La sección de Evolución mensual te muestra cómo se han comportado tus gastos mes a mes a lo largo del tiempo.
+
+Aquí puedes:
+- Ver un gráfico con el total de gastos por mes.
+- Analizar los gastos totales o filtrar por una categoría específica.
+- Cambiar el período de análisis entre:
+  - Últimos 6 meses
+  - Últimos 12 meses
+  - Este año (desde enero hasta hoy)
+
+Encima del gráfico verás un insight principal que compara el último mes cerrado con el mes anterior, mostrando si gastaste más o menos y en qué porcentaje.
+
+El mes actual se marca como “mes en curso” y no se usa para comparaciones, ya que aún no ha terminado.
+
+Al tocar un punto del gráfico puedes ver:
+- El mes correspondiente.
+- El total gastado.
+- La variación porcentual frente al mes anterior, cuando aplica.
+
+Esta vista es útil para identificar tendencias, detectar aumentos sostenidos y entender la evolución general de tus gastos sin entrar en el detalle diario.
+  `,
+},
+
+
+{
   id: "menu-telegram",
   title: "Menú de Telegram",
   body: `

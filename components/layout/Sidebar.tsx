@@ -11,11 +11,12 @@ import Image from "next/image";
 import {
   Home,
   Table2,
-  PieChart,
+  TrendingUp,
   HelpCircle,
   Settings,
   LogOut,
   X,
+  LineChart,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
@@ -108,9 +109,9 @@ export function Sidebar({
           icon={<Table2 size={18} />}
         />
         <SidebarItem
-          label="Análisis avanzado (próx.)"
-          icon={<PieChart size={18} />}
-          disabled
+          label="Desempeño"
+          href="/performance"
+          icon={<LineChart size={18} />}
         />
 
         {/* Grupo: CUENTA */}
