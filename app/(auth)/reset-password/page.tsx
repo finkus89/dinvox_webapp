@@ -39,17 +39,23 @@ export default function ResetPasswordPage() {
       const code = url.searchParams.get("code");
 
       if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+        if (error || !data?.session) {
           setError("El enlace es inválido o ha expirado. Solicita uno nuevo.");
           setReady(false);
           return;
         }
 
+        setReady(true);
+
         // Limpiar la URL (opcional pero recomendado)
         url.searchParams.delete("code");
         window.history.replaceState({}, "", url.toString());
+
+        return; // <- CLAVE: no sigas a getSession()
       }
+
 
       // 2) Verificar que ya exista sesión
       const { data } = await supabase.auth.getSession();
