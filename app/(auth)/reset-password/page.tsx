@@ -3,6 +3,13 @@
 // -------------------------------------------------
 // Permite crear una nueva contraseña solo si el usuario
 // llega desde un enlace válido de recuperación (Supabase).
+//
+// ✅ IMPORTANTE (enero 2026):
+// Cambiamos el email template de Supabase para que el enlace venga así:
+//   /reset-password?token_hash=...&type=recovery
+// Esto evita el problema PKCE ("code_verifier") que fallaba en algunos navegadores/correos.
+// Por eso, aquí ya NO usamos exchangeCodeForSession(code).
+//
 // Si el enlace es inválido o expiró, bloquea el formulario.
 
 "use client";
@@ -10,56 +17,61 @@
 import Image from "next/image";
 import Link from "next/link";
 
-// NUEVO: hooks y router
+// Hooks y router
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-// NUEVO: cliente Supabase (browser)
+// Cliente Supabase (browser)
 import { createClient } from "@/lib/supabase/browser";
 
 export default function ResetPasswordPage() {
-  // NUEVO: inicializar Supabase y router
   const supabase = createClient();
   const router = useRouter();
 
-  // NUEVO: estados mínimos
+  // Estados del formulario
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false); // solo true si hay sesión recovery
 
-  // NUEVO: verificar si existe una sesión válida de recuperación
+  // Solo true si hay sesión válida de recuperación (recovery)
+  const [ready, setReady] = useState(false);
+
+  // Verificar si existe una sesión válida de recuperación
   useEffect(() => {
     const run = async () => {
       setError(null);
 
-      // 1) Canjear el code PKCE por sesión
       const url = new URL(window.location.href);
-      const code = url.searchParams.get("code");
 
-      if (code) {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      // 1) Nuevo flujo (recomendado): token_hash + verifyOtp()
+      // Viene del correo template: /reset-password?token_hash=...&type=recovery
+      const token_hash = url.searchParams.get("token_hash");
+      const type = url.searchParams.get("type");
 
-       if (error || !data?.session) {
-          console.log("EXCHANGE ERROR:", error);
-          setError(error?.message ?? "Exchange falló (sin mensaje).");
+      if (token_hash && type === "recovery") {
+        const { error } = await supabase.auth.verifyOtp({
+          type: "recovery",
+          token_hash,
+        });
+
+        if (error) {
+          setError("El enlace es inválido o ha expirado. Solicita uno nuevo.");
           setReady(false);
           return;
         }
 
-
-        setReady(true);
-
-        // Limpiar la URL (opcional pero recomendado)
-        url.searchParams.delete("code");
+        // Limpiar URL para evitar reintentos / confusión al recargar
+        url.searchParams.delete("token_hash");
+        url.searchParams.delete("type");
         window.history.replaceState({}, "", url.toString());
 
-        return; // <- CLAVE: no sigas a getSession()
+        setReady(true);
+        return;
       }
 
-
-      // 2) Verificar que ya exista sesión
+      // 2) Si NO hay token_hash en la URL:
+      // Puede ser que el usuario ya tenga una sesión recovery activa (p.ej. volvió a la pestaña)
       const { data } = await supabase.auth.getSession();
       if (!data.session) {
         setError("El enlace es inválido o ha expirado. Solicita uno nuevo.");
@@ -74,8 +86,7 @@ export default function ResetPasswordPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-
-  // NUEVO: handler del formulario
+  // Handler del formulario
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (loading || !ready) return;
@@ -101,7 +112,7 @@ export default function ResetPasswordPage() {
         return;
       }
 
-      // NUEVO: cerrar sesión recovery y redirigir a login
+      // Cerrar sesión recovery y redirigir a login
       await supabase.auth.signOut();
       router.replace("/login");
     } finally {
@@ -145,7 +156,7 @@ export default function ResetPasswordPage() {
           Ingresa tu nueva contraseña y confírmala para continuar.
         </p>
 
-        {/* NUEVO: mensaje de error general */}
+        {/* Mensaje de error */}
         {error && (
           <div className="mb-4 text-sm text-red-200 bg-red-500/10 border border-red-300/20 rounded-xl px-3 py-2 text-center">
             {error}
@@ -168,6 +179,7 @@ export default function ResetPasswordPage() {
               disabled={!ready || loading}
             />
           </div>
+
           <div>
             <input
               type="password"
@@ -211,7 +223,7 @@ export default function ResetPasswordPage() {
           </Link>
         </div>
 
-        {/* NUEVO: acceso rápido si el enlace expiró */}
+        {/* Acceso rápido si el enlace expiró */}
         {!ready && (
           <div className="mt-4 text-center text-sm text-white/60">
             <Link
