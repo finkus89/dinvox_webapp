@@ -31,13 +31,30 @@ export default function ResetPasswordPage() {
 
   // NUEVO: verificar si existe una sesión válida de recuperación
   useEffect(() => {
-    const checkRecoverySession = async () => {
-      const { data } = await supabase.auth.getSession();
+    const run = async () => {
+      setError(null);
 
+      // 1) Canjear el code PKCE por sesión
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get("code");
+
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          setError("El enlace es inválido o ha expirado. Solicita uno nuevo.");
+          setReady(false);
+          return;
+        }
+
+        // Limpiar la URL (opcional pero recomendado)
+        url.searchParams.delete("code");
+        window.history.replaceState({}, "", url.toString());
+      }
+
+      // 2) Verificar que ya exista sesión
+      const { data } = await supabase.auth.getSession();
       if (!data.session) {
-        setError(
-          "El enlace es inválido o ha expirado. Solicita uno nuevo."
-        );
+        setError("El enlace es inválido o ha expirado. Solicita uno nuevo.");
         setReady(false);
         return;
       }
@@ -45,8 +62,10 @@ export default function ResetPasswordPage() {
       setReady(true);
     };
 
-    checkRecoverySession();
-  }, [supabase]);
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   // NUEVO: handler del formulario
   async function onSubmit(e: React.FormEvent) {

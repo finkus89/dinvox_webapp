@@ -11,7 +11,9 @@ export function middleware(req: NextRequest) {
     pathname.startsWith("/api") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/assets") ||
-    pathname.startsWith("/auth/callback")
+    pathname.startsWith("/auth/callback")||
+    pathname.startsWith("/reset-password") ||
+    pathname.startsWith("/forgot-password")
   ) {
     return NextResponse.next();
   }
@@ -54,6 +56,8 @@ export function middleware(req: NextRequest) {
 // Configuración del middleware
 export const config = {
   matcher: [
+    "/reset-password",
+    "/forgot-password",
     "/(login|register)",
     "/dashboard/:path*",
     "/connect-telegram/:path*",

@@ -185,6 +185,8 @@ export default function PerformancePage() {
 
           {/* Secciones segun filtro  */}
           <Accordion defaultOpenKey={visibleSections[0]}>
+            
+            {/* tercios */}
             {visibleSections.includes("monththirds") && (
               <AccordionSection
                 sectionKey="monththirds"
@@ -201,6 +203,7 @@ export default function PerformancePage() {
               </AccordionSection>
             )}
 
+            {/* ritmo*/}
             {visibleSections.includes("rhythm") && (
               <AccordionSection
                 sectionKey="rhythm"
@@ -230,6 +233,7 @@ export default function PerformancePage() {
               </AccordionSection>
             )} */}
 
+            {/* evolucion */}
             {visibleSections.includes("evolution") &&
               (period === "last_6_months" ||
               period === "last_12_months" ||
