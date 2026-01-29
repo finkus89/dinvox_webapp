@@ -41,11 +41,13 @@ export default function ResetPasswordPage() {
       if (code) {
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
-        if (error || !data?.session) {
-          setError("El enlace es inválido o ha expirado. Solicita uno nuevo.");
+       if (error || !data?.session) {
+          console.log("EXCHANGE ERROR:", error);
+          setError(error?.message ?? "Exchange falló (sin mensaje).");
           setReady(false);
           return;
         }
+
 
         setReady(true);
 
