@@ -11,10 +11,10 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react"; // 🆕 useMemo
 import { CATEGORIES, type CategoryId } from "@/lib/dinvox/categories";
 
-//obtine fecha d ehoy para limitar fecha 
+//obtine fecha d ehoy para limitar fecha
 function getTodayLocalStr(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -26,7 +26,7 @@ function getTodayLocalStr(): string {
 // Tipo mínimo que necesitamos del gasto
 export type EditableExpense = {
   id: string;
-  date: string;          // "YYYY-MM-DD"
+  date: string; // "YYYY-MM-DD"
   categoryId: CategoryId;
   amount: number;
   currency: string;
@@ -38,6 +38,10 @@ interface EditExpenseModalProps {
   expense: EditableExpense | null;
   onClose: () => void;
   onSaved: (updated: EditableExpense) => void;
+
+  // 🆕 locale del usuario (para consistencia con NewExpenseModal)
+  // Ej: "es-CO", "es-ES", "en-US"
+  language?: string;
 }
 
 export default function EditExpenseModal({
@@ -45,6 +49,7 @@ export default function EditExpenseModal({
   expense,
   onClose,
   onSaved,
+  language: languageProp, // 🆕
 }: EditExpenseModalProps) {
   // ---------------------------------------------------------------------------
   // ESTADO LOCAL DEL FORMULARIO
@@ -59,6 +64,52 @@ export default function EditExpenseModal({
   const [error, setError] = useState<string | null>(null);
 
   const todayStr = getTodayLocalStr();
+
+  // 🆕 moneda del gasto (si expense viene null, fallback seguro)
+  const currency = (expense?.currency ?? "COP").toUpperCase();
+
+  // 🆕 locale del usuario (fallback seguro)
+  const language = languageProp ?? "en-US";
+
+  // 🆕 decimales automáticos por moneda (Intl)
+  const currencyDecimals: number = useMemo((): number => {
+    if (!currency) return 2;
+
+    try {
+      const fmt = new Intl.NumberFormat(language, {
+        style: "currency",
+        currency,
+      });
+
+      const digits = fmt.resolvedOptions().maximumFractionDigits; // ej: 0, 2, 3
+      return typeof digits === "number" ? digits : 2;
+    } catch {
+      return 2;
+    }
+  }, [currency, language]);
+
+  const usesZeroDecimals = currencyDecimals === 0;
+
+  // 🆕 parse robusto: NO borrar puntos a ciegas (eso rompe 8.60)
+  function parseAmount(raw: string): number {
+    const s = raw.trim().replace(/\s+/g, "");
+
+    // Si la moneda es de 0 decimales (ej: COP/CLP/JPY),
+    // permitimos puntos/comedas como separadores de miles, pero al final dejamos solo dígitos.
+    if (usesZeroDecimals) {
+      const digitsOnly = s.replace(/[^\d]/g, "");
+      const n = Number(digitsOnly);
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    // Para monedas con decimales:
+    // - permitimos "8.60" o "8,60"
+    // - normalizamos coma -> punto
+    const normalized = s.replace(",", ".");
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
   // Cuando cambie el gasto a editar, rellenamos el formulario
   useEffect(() => {
     if (!open || !expense) return;
@@ -83,7 +134,7 @@ export default function EditExpenseModal({
     e.preventDefault();
     if (!expense) return;
 
-     // Validación rápida de fecha futura (igual criterio que NewExpenseModal)
+    // Validación rápida de fecha futura (igual criterio que NewExpenseModal)
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!form.date || !dateRegex.test(form.date)) {
       setError("Selecciona una fecha válida.");
@@ -94,7 +145,6 @@ export default function EditExpenseModal({
       setError("La fecha no puede ser futura.");
       return;
     }
-
 
     // Validación simple de categoría
     if (!form.category) {
@@ -110,14 +160,7 @@ export default function EditExpenseModal({
       setIsSaving(true);
       setError(null);
 
-      // Normalizar monto (quitando separadores de miles y espacios)
-      const rawAmount = form.amount
-        .replace(/\s+/g, "")   // quitar espacios
-        .replace(/\./g, "")    // puntos de miles
-        .replace(",", ".");    // coma a punto
-
-      const amountNumber = Number(rawAmount) || 0;
-
+      const amountNumber = parseAmount(form.amount); // 🆕
       if (form.amount.length > 12) {
         setError("El monto es demasiado grande.");
         setIsSaving(false);
@@ -127,6 +170,16 @@ export default function EditExpenseModal({
         setError("El monto debe ser un número positivo.");
         setIsSaving(false);
         return;
+      }
+
+      // 🆕 validación: máximo decimales permitidos por la moneda
+      if (!usesZeroDecimals) {
+        const decimals = (String(form.amount).split(/[.,]/)[1] ?? "").length;
+        if (decimals > currencyDecimals) {
+          setError(`Máximo ${currencyDecimals} decimales para esta moneda.`);
+          setIsSaving(false);
+          return;
+        }
       }
 
       if (form.note.length > 200) {
@@ -213,13 +266,11 @@ export default function EditExpenseModal({
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* FECHA */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-slate-200">
-                Fecha
-              </label>
+              <label className="text-xs font-medium text-slate-200">Fecha</label>
               <input
                 type="date"
                 value={form.date}
-                max={todayStr} // ← bloquea fechas futuras en el selector
+                max={todayStr}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, date: e.target.value }))
                 }
@@ -236,9 +287,7 @@ export default function EditExpenseModal({
 
             {/* CATEGORÍA */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-slate-200">
-                Categoría
-              </label>
+              <label className="text-xs font-medium text-slate-200">Categoría</label>
               <select
                 value={form.category}
                 onChange={(e) =>
@@ -267,7 +316,8 @@ export default function EditExpenseModal({
               </label>
               <input
                 type="text"
-                placeholder="Ej: 25000"
+                inputMode="decimal" // 🆕 ayuda en móvil para teclado decimal
+                placeholder={usesZeroDecimals ? "Ej: 25000" : "Ej: 8.60"} // 🆕
                 value={form.amount}
                 maxLength={12}
                 onChange={(e) =>
@@ -305,7 +355,7 @@ export default function EditExpenseModal({
               />
             </div>
 
-            {/* BOTONES (alineados con NewExpenseModal) */}
+            {/* BOTONES */}
             <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"

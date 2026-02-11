@@ -198,6 +198,7 @@ export default function PerformancePage() {
                     period={period}
                     embedded
                     fallbackCurrency={currencyDisplay}
+                    fallbackLanguage={dbUser?.language ?? "es-CO"}   // ✅ nuevo
                   />
                 )}
               </AccordionSection>
@@ -215,6 +216,7 @@ export default function PerformancePage() {
                     period={period}
                     embedded
                     fallbackCurrency={currencyDisplay}
+                    fallbackLanguage={dbUser?.language ?? "es-CO"}   // ✅ nuevo
                   />
                 )}
               </AccordionSection>
@@ -247,6 +249,7 @@ export default function PerformancePage() {
                   period={period}
                   embedded
                   fallbackCurrency={currencyDisplay}
+                  fallbackLanguage={dbUser?.language ?? "es-CO"}
                 />
               </AccordionSection>
             )}

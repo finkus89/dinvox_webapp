@@ -12,7 +12,6 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import PageContainer from "@/components/layout/PageContainer";
 import SummaryCard from "@/components/dashboard/SummaryCard";
 
-
 // 🔹 Datos reales del usuario desde la BD
 interface DBUser {
   name: string;
@@ -26,10 +25,7 @@ function formatName(raw: string): string {
     .trim()
     .split(" ")
     .filter(Boolean)
-    .map(
-      (part) =>
-        part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
-    )
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
 }
 
@@ -74,6 +70,10 @@ export default function DashboardPage() {
   // Comentario: si en la BD ya guardas "es-co", aquí simplemente lo mostramos
   const languageDisplay = (dbUser?.language ?? "es-co").toUpperCase();
   const currencyDisplay = (dbUser?.currency ?? "COP").toUpperCase();
+
+  // 🆕 Valores “source of truth” para formateo de dinero en cards (desde BD)
+  const language = dbUser?.language ?? "es-CO";
+  const currency = dbUser?.currency ?? "COP";
 
   return (
     <div className="h-screen flex bg-slate-100 overflow-hidden">
@@ -127,12 +127,14 @@ export default function DashboardPage() {
           title="Dashboard"
         />
 
-          {/* CONTENIDO PRINCIPAL usando PageContainer */}
-          <PageContainer>
-            {/* Tarjeta 1: Resumen (dona + categorias) */}
-            <SummaryCard />
-          </PageContainer>
-      
+        {/* CONTENIDO PRINCIPAL usando PageContainer */}
+        <PageContainer>
+          {/* Tarjeta 1: Resumen (dona + categorias) */}
+          <SummaryCard
+            fallbackCurrency={currency} // 🆕 currency real desde BD
+            fallbackLanguage={language} // 🆕 language real desde BD (ej: es-CO, es-ES)
+          />
+        </PageContainer>
       </div>
     </div>
   );

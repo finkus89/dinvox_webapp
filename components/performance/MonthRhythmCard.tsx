@@ -37,6 +37,9 @@ import {
   shiftMonthKey,
 } from "@/lib/analytics/dates";
 
+// ✅ helper central (moneda + decimales + locale)
+import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
+
 // -----------------------
 // Tipos (alineado con /api/expenses)
 // -----------------------
@@ -44,6 +47,7 @@ import {
 type MonthRhythmCardProps = {
   period: Extract<AnalysisPeriodValue, "current_month" | "previous_month">;
   fallbackCurrency?: string; // ej "COP"
+  fallbackLanguage?: string; // ✅ ej "es-CO" | "es-ES" | "en-US" | "en-CA"
   embedded?: boolean;
 };
 
@@ -59,12 +63,6 @@ type ApiExpense = {
 // -----------------------
 // Helpers UI (misma idea que en Tercios)
 // -----------------------
-
-function formatMoney(amount: number, currency: string) {
-  const rounded = Math.round(amount);
-  const withSep = rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${currency} ${withSep}`;
-}
 
 function formatPctSigned(pct: number): string {
   const sign = pct > 0 ? "+" : "";
@@ -86,6 +84,7 @@ function confidenceLabel(c: "sin_referencia" | "preliminar" | "solida") {
 export default function MonthRhythmCard({
   period,
   fallbackCurrency = "COP",
+  fallbackLanguage = "es-CO",
   embedded = false,
 }: MonthRhythmCardProps) {
   const [loading, setLoading] = useState(true);
@@ -108,8 +107,14 @@ export default function MonthRhythmCard({
   const monthLabel = useMemo(() => getMonthLabelEs(anchorDate), [anchorDate]);
 
   // Rango del mes seleccionado (para to / cálculo dayLimit)
-  const selectedFrom = useMemo(() => getMonthStartYYYYMMDD(anchorDate), [anchorDate]);
-  const selectedTo = useMemo(() => getMonthEndYYYYMMDD(anchorDate), [anchorDate]);
+  const selectedFrom = useMemo(
+    () => getMonthStartYYYYMMDD(anchorDate),
+    [anchorDate]
+  );
+  const selectedTo = useMemo(
+    () => getMonthEndYYYYMMDD(anchorDate),
+    [anchorDate]
+  );
 
   // monthKey del mes seleccionado (YYYY-MM), inferido desde selectedFrom ("YYYY-MM-01")
   const selectedMonthKey = useMemo(() => {
@@ -222,6 +227,11 @@ export default function MonthRhythmCard({
     return apiCurrency ?? (fallbackCurrency?.toUpperCase?.() ?? "COP");
   }, [expenses, fallbackCurrency]);
 
+  // ✅ locale real para Intl (NO uppercase)
+  const language = useMemo(() => {
+    return fallbackLanguage ?? "es-CO";
+  }, [fallbackLanguage]);
+
   // -----------------------
   // Render
   // -----------------------
@@ -243,9 +253,7 @@ export default function MonthRhythmCard({
       {!embedded && (
         <div className="flex flex-col gap-1">
           <h3 className="text-xl sm:text-2xl font-semibold tracking-tight">
-            {period === "previous_month"
-              ? "Ritmo del mes anterior"
-              : "Ritmo del mes"}
+            {period === "previous_month" ? "Ritmo del mes anterior" : "Ritmo del mes"}
           </h3>
           <p className="text-sm text-white/80">
             {period === "previous_month"
@@ -267,9 +275,7 @@ export default function MonthRhythmCard({
 
         {!loading && !error && !pace && (
           <div className="rounded-2xl border border-white/15 bg-white/10 p-4">
-            <p className="text-sm font-semibold text-white">
-              No se pudo calcular el ritmo
-            </p>
+            <p className="text-sm font-semibold text-white">No se pudo calcular el ritmo</p>
             <p className="text-sm text-white/80 mt-1">
               Revisa que exista data para el mes {monthLabel}.
             </p>
@@ -277,7 +283,13 @@ export default function MonthRhythmCard({
         )}
 
         {!loading && !error && pace && (
-          <div className={embedded ? "grid grid-cols-1 md:grid-cols-2 gap-4" : "grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6"}>
+          <div
+            className={
+              embedded
+                ? "grid grid-cols-1 md:grid-cols-2 gap-4"
+                : "grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6"
+            }
+          >
             {/* =========================
                 Columna izquierda: números + estado
                 ========================= */}
@@ -306,7 +318,9 @@ export default function MonthRhythmCard({
                     </div>
                     <div className="text-xs text-white/70">
                       {pace.baselineMonthsUsed.length > 0
-                        ? `vs promedio reciente (${pace.baselineMonthsUsed.length} mes${pace.baselineMonthsUsed.length === 1 ? "" : "es"})`
+                        ? `vs promedio reciente (${pace.baselineMonthsUsed.length} mes${
+                            pace.baselineMonthsUsed.length === 1 ? "" : "es"
+                          })`
                         : "sin referencia"}
                     </div>
                   </div>
@@ -328,79 +342,78 @@ export default function MonthRhythmCard({
                   </div>
 
                   {/* Tooltip / tabla de umbrales (simple, sin UI compleja aún) */}
-                    <div className="mt-4 pt-4 border-t border-white/15">
-                        <div className="text-xs text-white/70">Cómo va tu gasto</div>
-                        <div className="mt-2 text-xs text-white/80 space-y-1">
-                        <div>
-                            <span className="font-semibold text-white">Gasto contenido:</span>{" "}
-                            R &lt; {DEFAULT_MONTH_PACE_CONFIG.thresholdContenido}
-                        </div>
-                        <div>
-                            <span className="font-semibold text-white">Gasto normal:</span>{" "}
-                            {DEFAULT_MONTH_PACE_CONFIG.thresholdContenido} – {DEFAULT_MONTH_PACE_CONFIG.thresholdAcelerado}
-                        </div>
-                        <div>
-                            <span className="font-semibold text-white">Gasto acelerado:</span>{" "}
-                            R &gt; {DEFAULT_MONTH_PACE_CONFIG.thresholdAcelerado}
-                        </div>
-                        </div>
+                  <div className="mt-4 pt-4 border-t border-white/15">
+                    <div className="text-xs text-white/70">Cómo va tu gasto</div>
+                    <div className="mt-2 text-xs text-white/80 space-y-1">
+                      <div>
+                        <span className="font-semibold text-white">Gasto contenido:</span>{" "}
+                        R &lt; {DEFAULT_MONTH_PACE_CONFIG.thresholdContenido}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-white">Gasto normal:</span>{" "}
+                        {DEFAULT_MONTH_PACE_CONFIG.thresholdContenido} –{" "}
+                        {DEFAULT_MONTH_PACE_CONFIG.thresholdAcelerado}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-white">Gasto acelerado:</span>{" "}
+                        R &gt; {DEFAULT_MONTH_PACE_CONFIG.thresholdAcelerado}
+                      </div>
                     </div>
+                  </div>
                 </div>
               ) : (
                 // Fallback: sin baseline (o baseline inválido)
-                    <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 p-4">
-                        <p className="text-sm font-semibold text-white">
-                            Aún no hay referencia suficiente
-                        </p>
-                        <p className="mt-1 text-xs text-white/80">
-                            Este mes será tu referencia inicial. Por ahora te mostramos tu promedio diario.
-                        </p>
+                <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 p-4">
+                  <p className="text-sm font-semibold text-white">
+                    Aún no hay referencia suficiente
+                  </p>
+                  <p className="mt-1 text-xs text-white/80">
+                    Este mes será tu referencia inicial. Por ahora te mostramos tu promedio diario.
+                  </p>
 
-                        <div className="mt-4 flex items-center justify-between gap-3">
-                            <div className="text-xs text-white/70">Promedio diario (a la fecha)</div>
-                            <div className="text-lg font-semibold text-white">
-                            {formatMoney(pace.avgDailyActual, currency)}
-                            </div>
-                        </div>
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <div className="text-xs text-white/70">Promedio diario (a la fecha)</div>
+                    <div className="text-lg font-semibold text-white">
+                      {formatMoneyUI(pace.avgDailyActual, currency, language)}
                     </div>
+                  </div>
+                </div>
               )}
-
-              
             </div>
 
             {/* =========================
                 Columna derecha: gráfico (placeholder por ahora)
                 ========================= */}
             <div className="rounded-2xl border border-white/15 bg-white/10 p-4 sm:p-5">
-                <div className="text-sm font-semibold text-white">Ritmo (acumulado)</div>
-                <p className="mt-1 text-xs text-white/80">
-                    Comparación del acumulado diario vs referencia (si existe).
-                </p>
+              <div className="text-sm font-semibold text-white">Ritmo (acumulado)</div>
+              <p className="mt-1 text-xs text-white/80">
+                Comparación del acumulado diario vs referencia (si existe).
+              </p>
 
-                <div className="mt-4">
-                    <MonthRhythmLineChart data={pace.chart} currency={currency} />
-                </div>
+              <div className="mt-4">
+                {/* ✅ luego revisamos este chart: probablemente también necesite language */}
+                <MonthRhythmLineChart data={pace.chart} currency={currency} language={language} />
+              </div>
 
-                <div className="mt-3 text-xs text-white/70">
-                    Día analizado:{" "}
-                    <span className="text-white/90 font-semibold">{pace.dayLimit}</span>
+              <div className="mt-3 text-xs text-white/70">
+                Día analizado:{" "}
+                <span className="text-white/90 font-semibold">{pace.dayLimit}</span>
+                {" • "}
+                Acumulado:{" "}
+                <span className="text-white/90 font-semibold">
+                  {formatMoneyUI(pace.actualToDay, currency, language)}
+                </span>
+                {pace.baselineToDay != null ? (
+                  <>
                     {" • "}
-                    Acumulado:{" "}
+                    Referencia:{" "}
                     <span className="text-white/90 font-semibold">
-                    {formatMoney(pace.actualToDay, currency)}
+                      {formatMoneyUI(pace.baselineToDay, currency, language)}
                     </span>
-                    {pace.baselineToDay != null ? (
-                    <>
-                        {" • "}
-                        Referencia:{" "}
-                        <span className="text-white/90 font-semibold">
-                        {formatMoney(pace.baselineToDay, currency)}
-                        </span>
-                    </>
-                    ) : null}
-                </div>
-                </div>
-
+                  </>
+                ) : null}
+              </div>
+            </div>
           </div>
         )}
       </div>

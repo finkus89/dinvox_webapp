@@ -18,7 +18,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react"; // 🆕 useMemo
 import { CATEGORIES, type CategoryId } from "@/lib/dinvox/categories";
 
 // Props públicas del modal
@@ -28,9 +28,13 @@ type NewExpenseModalProps = {
   // Opcional: callback para que el padre pueda refrescar la tabla
   onCreated?: () => void;
   onSuccess?: () => void;
+
+  // 🆕 para soportar decimales y UX según moneda/idioma
+  currency?: string; // ej: "COP" | "EUR"
+  language?: string; // ej: "es-CO" | "es-ES"
 };
 
-//Helper para “hoy” en zona local
+// Helper para “hoy” en zona local
 function getTodayLocalStr(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -41,9 +45,9 @@ function getTodayLocalStr(): string {
 
 // Estado interno del formulario
 type FormState = {
-  date: string;        // "YYYY-MM-DD"
-  categoryId: string;  // CategoryId como string
-  amount: string;      // lo manejamos como string en el input
+  date: string; // "YYYY-MM-DD"
+  categoryId: string; // CategoryId como string
+  amount: string; // lo manejamos como string en el input
   note: string;
 };
 
@@ -54,6 +58,8 @@ export default function NewExpenseModal({
   onClose,
   onCreated,
   onSuccess,
+  currency: currencyProp, // 🆕
+  language: languageProp, // 🆕
 }: NewExpenseModalProps) {
   // =============================
   // ESTADO
@@ -71,6 +77,35 @@ export default function NewExpenseModal({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const todayStr = getTodayLocalStr();
 
+  // 🆕 defaults seguros (por si no pasas props todavía)
+  // NOTA: evitamos caer silenciosamente en COP si no llega currencyProp.
+  const currency = currencyProp ? currencyProp.toUpperCase() : null;
+  const language = languageProp ?? "es-CO";
+  const isCurrencyReady = !!currency; // 🆕 evita UX confusa si no llega moneda
+
+  // 🆕 reglas de decimales por moneda (automático con Intl)
+  const currencyDecimals: number = useMemo((): number => {
+    if (!currency) return 2;
+
+    try {
+      const fmt = new Intl.NumberFormat(language, {
+        style: "currency",
+        currency,
+      });
+
+      const digits = fmt.resolvedOptions().maximumFractionDigits; // ej: 0, 2, 3
+      return typeof digits === "number" ? digits : 2;
+    } catch {
+      // fallback seguro si la moneda no es válida ISO
+      return 2;
+    }
+  }, [currency, language]);
+
+  const usesZeroDecimals = currencyDecimals === 0;
+
+  // Step para el input
+  const amountStep = usesZeroDecimals ? "1" : "0.01";
+
   // Cuando se abre el modal, inicializamos el formulario (fecha = hoy)
   useEffect(() => {
     if (!open) return;
@@ -82,7 +117,7 @@ export default function NewExpenseModal({
 
     setForm({
       date: `${yyyy}-${mm}-${dd}`,
-      categoryId: "", // sin categoría preseleccionada por ahora
+      categoryId: "",
       amount: "",
       note: "",
     });
@@ -107,6 +142,13 @@ export default function NewExpenseModal({
     }));
   }
 
+  // 🆕 parse robusto para coma decimal (es-ES) y espacios
+  function parseAmount(raw: string): number {
+    const cleaned = raw.trim().replace(/\s+/g, "").replace(",", "."); // coma -> punto
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
   function validateForm(): boolean {
     const newErrors: FormErrors = {};
 
@@ -117,9 +159,8 @@ export default function NewExpenseModal({
     }
     // fecha futura
     if (form.date > todayStr) {
-      newErrors.date="La fecha no puede ser futura.";
+      newErrors.date = "La fecha no puede ser futura.";
     }
-
 
     // Categoría
     if (!form.categoryId) {
@@ -128,18 +169,33 @@ export default function NewExpenseModal({
       newErrors.categoryId = "Categoría inválida.";
     }
 
+    // 🆕 si no hay moneda, bloqueamos guardar (esto evita que se guarde con reglas incorrectas)
+    if (!isCurrencyReady) {
+      newErrors.amount =
+        "No se pudo cargar la moneda del usuario. Cierra y vuelve a abrir.";
+    }
+
     // Monto
-    const amountNum = Number(form.amount.replace(/\s+/g, ""));
+    const amountNum = parseAmount(form.amount); // 🆕
     if (!form.amount) {
       newErrors.amount = "Ingresa un monto.";
     } else if (!Number.isFinite(amountNum) || amountNum <= 0) {
       newErrors.amount = "El monto debe ser un número positivo.";
     }
+
+    // 🆕 validación: máximo decimales permitidos por la moneda
+    if (Number.isFinite(amountNum)) {
+      const decimals = (String(form.amount).split(/[.,]/)[1] ?? "").length;
+      if (decimals > currencyDecimals) {
+        newErrors.amount = `Máximo ${currencyDecimals} decimales para esta moneda.`;
+      }
+    }
+
     if (form.amount.length > 12) {
       newErrors.amount = "El monto es demasiado grande.";
     }
 
-    // Nota (opcional, pero limitamos longitud para no exagerar)
+    // Nota
     if (form.note.length > 200) {
       newErrors.note = "La nota no puede superar 200 caracteres.";
     }
@@ -156,7 +212,10 @@ export default function NewExpenseModal({
 
     setIsSubmitting(true);
     try {
-      const amountNum = Number(form.amount.replace(/\s+/g, ""));
+      const amountNum = parseAmount(form.amount); // 🆕
+      if (!Number.isFinite(amountNum)) {
+        throw new Error("Monto inválido.");
+      }
 
       const res = await fetch("/api/expenses", {
         method: "POST",
@@ -176,13 +235,8 @@ export default function NewExpenseModal({
         throw new Error(body?.error || `Error HTTP ${res.status}`);
       }
 
-      // Si todo bien, podríamos leer el gasto creado si lo necesitas:
-      // const created = await res.json();
-      // Por ahora no lo usamos directamente aquí.
-
-      // Avisar al padre (para refrescar la tabla) y cerrar
       onCreated?.();
-      onSuccess?.(); 
+      onSuccess?.();
       onClose();
     } catch (err: any) {
       console.error("Error al crear gasto:", err);
@@ -195,7 +249,7 @@ export default function NewExpenseModal({
   }
 
   // =============================
-  // RENDER (si no está abierto, no pinta nada)
+  // RENDER
   // =============================
 
   if (!open) return null;
@@ -245,14 +299,12 @@ export default function NewExpenseModal({
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* FECHA */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-slate-200">
-                Fecha
-              </label>
+              <label className="text-xs font-medium text-slate-200">Fecha</label>
               <input
                 type="date"
                 value={form.date}
                 onChange={(e) => handleChange("date", e.target.value)}
-                max={todayStr} 
+                max={todayStr}
                 className="
                   w-full rounded-xl border border-white/10
                   bg-slate-900/60 px-3 py-2
@@ -269,9 +321,7 @@ export default function NewExpenseModal({
 
             {/* CATEGORÍA */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-slate-200">
-                Categoría
-              </label>
+              <label className="text-xs font-medium text-slate-200">Categoría</label>
               <select
                 value={form.categoryId}
                 onChange={(e) => handleChange("categoryId", e.target.value)}
@@ -297,22 +347,24 @@ export default function NewExpenseModal({
             {/* MONTO */}
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-slate-200">
-                Monto
+                Monto ({currency ?? "—"}) {/* 🆕 ayuda visual */}
               </label>
               <input
                 type="number"
-                inputMode="numeric"
+                inputMode="decimal" // 🆕 (antes numeric)
                 min="0"
-                step="100"
-                placeholder="Ej: 25000"
+                step={amountStep} // 🆕 (antes 100)
+                placeholder={usesZeroDecimals ? "Ej: 25000" : "Ej: 8.60"} // 🆕
                 value={form.amount}
                 maxLength={12}
                 onChange={(e) => handleChange("amount", e.target.value)}
+                disabled={!isCurrencyReady || isSubmitting} // 🆕 evita caer en COP silencioso
                 className="
                   w-full rounded-xl border border-white/10
                   bg-slate-900/60 px-3 py-2
                   text-sm text-slate-100
                   focus:outline-none focus:ring-2 focus:ring-emerald-400/70
+                  disabled:opacity-60 disabled:cursor-not-allowed
                 "
               />
               {errors.amount && (
@@ -365,7 +417,7 @@ export default function NewExpenseModal({
 
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || !isCurrencyReady} // 🆕 evita guardar sin moneda
                 className="
                   inline-flex items-center justify-center gap-2
                   rounded-xl border border-emerald-400/40

@@ -16,6 +16,12 @@
 // - Mostrar tabla con scroll interno, ordenada por fecha descendente
 //   (el backend ya devuelve orden descendente por expense_date).
 // -----------------------------------------------------------------------------
+//
+// ✅ Ajustes mínimos para soportar EUR/USD (decimales) + símbolo correcto:
+// - Usar formatMoney(amount, currency, language)
+// - Pasar fallbackCurrency/fallbackLanguage desde /expenses/page.tsx
+// - No pasar props que NewExpenseModal no soporta (currency/language) para no romper TS
+// -----------------------------------------------------------------------------
 
 "use client";
 
@@ -41,21 +47,24 @@ import EditExpenseModal, {
 
 import {
   ApiExpense,
-  formatAmount,
-  formatAmountNoCurrency,
   exportExpensesToCSV,
+  formatMoney, // ✅ helper centralizado
 } from "@/lib/dinvox/expenses-utils";
 import { initPeriodState } from "@/lib/dinvox/period-initializer";
 
 // Props opcionales para permitir que otra pantalla (ej. Dashboard)
 // fije el rango inicial de fechas y la categoría al entrar a esta tarjeta.
 interface ExpensesTableCardProps {
-  initialFrom?: string;      // YYYY-MM-DD (opcional)
-  initialTo?: string;        // YYYY-MM-DD (opcional)
-  initialCategory?: string;  // "all" o un CategoryId (opcional)
+  initialFrom?: string; // YYYY-MM-DD (opcional)
+  initialTo?: string; // YYYY-MM-DD (opcional)
+  initialCategory?: string; // "all" o un CategoryId (opcional)
   // Tipo de período inicial tal como venga de la URL.
   // Lo tratamos como string para no pelear con PeriodFilterValue aquí.
   initialPeriodType?: PeriodFilterValue;
+
+  // ✅ Fallbacks para cuando el rango no tiene gastos (y no hay currency en expenses[0])
+  fallbackCurrency?: string; // ej: "COP", "EUR"
+  fallbackLanguage?: string; // ej: "es-CO", "es-ES"
 }
 
 // -----------------------------------------------------------------------------
@@ -66,21 +75,25 @@ export default function ExpensesTableCard({
   initialTo,
   initialCategory,
   initialPeriodType,
+  fallbackCurrency,
+  fallbackLanguage,
 }: ExpensesTableCardProps) {
   // =============================
   // ESTADO: filtros
   // =============================
-  //Inicializacion de periodos
+  // Inicializacion de periodos
   const [period, setPeriod] = useState<PeriodState>(() =>
-  initPeriodState(initialPeriodType, initialFrom, initialTo)
-);
+    initPeriodState(initialPeriodType, initialFrom, initialTo)
+  );
 
   const isRange = period.type === "range";
+
   // Filtro de categoría: "all" o un CategoryId ("comida", "transporte", etc.)
   // Si viene initialCategory desde la URL, la respetamos; si no, usamos "all".
   const [categoryFilter, setCategoryFilter] = useState<string>(
     initialCategory && initialCategory !== "all" ? initialCategory : "all"
   );
+
   // =============================
   // ESTADO: datos de la API
   // =============================
@@ -88,9 +101,11 @@ export default function ExpensesTableCard({
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
   // Modal "Nuevo gasto"
   const [isNewExpenseOpen, setIsNewExpenseOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+
   // ==== ESTADO PARA EDICIÓN ====
   const [editingExpense, setEditingExpense] = useState<ApiExpense | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -154,32 +169,43 @@ export default function ExpensesTableCard({
   // DERIVADOS
   // =============================
   const hasData = expenses.length > 0;
+
   const totalAmount = useMemo(
     () => expenses.reduce((acc, exp) => acc + exp.amount, 0),
     [expenses]
   );
 
-  const currency = expenses[0]?.currency ?? "COP";
+  // ✅ Fuente de verdad: API -> fallback -> default
+  const currency = (
+    expenses[0]?.currency ??
+    fallbackCurrency ??
+    "COP"
+  ).toUpperCase();
+
+  // ✅ OJO: locale debe quedarse tipo "es-CO" (no .toUpperCase())
+  const language = fallbackLanguage ?? "es-CO";
+
   const displayCurrency = currency || "COP";
 
-  //funcion de borrar
-async function handleDelete(id: string) {
-  try {
-    const res = await fetch(`/api/expenses/${id}`, {
-      method: "DELETE",
-    });
+  // funcion de borrar
+  async function handleDelete(id: string) {
+    try {
+      const res = await fetch(`/api/expenses/${id}`, {
+        method: "DELETE",
+      });
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.error || "Error al eliminar el gasto.");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Error al eliminar el gasto.");
+      }
+
+      // Recargar datos sin refrescar la página
+      setExpenses((prev) => prev.filter((e) => e.id !== id));
+    } catch (err: any) {
+      alert(err.message || "Error al eliminar.");
     }
-
-    // Recargar datos sin refrescar la página
-    setExpenses((prev) => prev.filter((e) => e.id !== id));
-  } catch (err: any) {
-    alert(err.message || "Error al eliminar.");
   }
-}
+
   // Handler para botón de exportar
   function handleExportClick() {
     exportExpensesToCSV(expenses, currency);
@@ -190,6 +216,7 @@ async function handleDelete(id: string) {
     setEditingExpense(expense);
     setIsEditOpen(true);
   }
+
   // =============================
   // RENDER
   // =============================
@@ -207,9 +234,9 @@ async function handleDelete(id: string) {
       ======================================================================= */}
       <div
         className="
-          grid 
-          md:grid-cols-3 
-          gap-6 
+          grid
+          md:grid-cols-3
+          gap-6
           mb-6
         "
       >
@@ -227,16 +254,26 @@ async function handleDelete(id: string) {
                   {expenses.length} gasto{expenses.length !== 1 && "s"}
                 </span>{" "}
                 entre{" "}
-                <span className="font-semibold">{formatDateHuman(period.from)}</span>{" "}
+                <span className="font-semibold">
+                  {formatDateHuman(period.from)}
+                </span>{" "}
                 y{" "}
-                <span className="font-semibold">{formatDateHuman(period.to)}</span>.
+                <span className="font-semibold">
+                  {formatDateHuman(period.to)}
+                </span>
+                .
               </>
             ) : (
               <>
                 No hay gastos registrados entre{" "}
-                <span className="font-semibold">{formatDateHuman(period.from)}</span>{" "}
+                <span className="font-semibold">
+                  {formatDateHuman(period.from)}
+                </span>{" "}
                 y{" "}
-                <span className="font-semibold">{formatDateHuman(period.to)}</span>.
+                <span className="font-semibold">
+                  {formatDateHuman(period.to)}
+                </span>
+                .
               </>
             )}
           </p>
@@ -245,7 +282,7 @@ async function handleDelete(id: string) {
             <p className="text-sm sm:text-base text-emerald-200/95 mt-1">
               Total en el período:{" "}
               <span className="font-bold text-emerald-100 text-xl">
-                {formatAmount(totalAmount, currency)}
+                {formatMoney(totalAmount, currency, language)}
               </span>
             </p>
           )}
@@ -286,13 +323,13 @@ async function handleDelete(id: string) {
             onClick={() => setIsNewExpenseOpen(true)}
             className="
               w-full md:w-[150px]
-              bg-emerald-500/20 
+              bg-emerald-500/20
               hover:bg-emerald-500/30
-              text-emerald-100 
-              font-semibold   
+              text-emerald-100
+              font-semibold
               px-3 py-1.5        /* más compacto en mobile */
               md:px-4 md:py-1.5   /* tamaño normal en desktop */
-              rounded-xl 
+              rounded-xl
               border border-emerald-400/20
               backdrop-blur
               transition
@@ -306,7 +343,7 @@ async function handleDelete(id: string) {
           <button
             onClick={handleExportClick}
             className="
-              w-full md:w-[150px] 
+              w-full md:w-[150px]
               bg-emerald-500/10
               hover:bg-emerald-500/20
               text-emerald-100
@@ -332,16 +369,12 @@ async function handleDelete(id: string) {
             from={period.from}
             to={period.to}
             onChangeFrom={(value) =>
-              setPeriod((prev) => ({
-                ...prev,
-                from: value,
-              }))
+              // 🔹 Actualizamos SOLO la fecha "desde" dentro del estado de período
+              setPeriod((prev) => ({ ...prev, from: value }))
             }
             onChangeTo={(value) =>
-              setPeriod((prev) => ({
-                ...prev,
-                to: value,
-              }))
+              // 🔹 Actualizamos SOLO la fecha "hasta" dentro del estado de período
+              setPeriod((prev) => ({ ...prev, to: value }))
             }
           />
         </div>
@@ -371,9 +404,7 @@ async function handleDelete(id: string) {
             <table className="min-w-[500px] md:min-w-full text-xs sm:text-sm">
               <thead className="sticky top-0 bg-slate-900/80 backdrop-blur border-b border-white/10">
                 <tr>
-                  <th className="px-2 py-2 text-center font-semibold text-slate-100">
-                      
-                  </th>
+                  <th className="px-2 py-2 text-center font-semibold text-slate-100"></th>
                   <th className="px-2 py-2 text-left font-semibold text-slate-100">
                     Fecha
                   </th>
@@ -402,7 +433,7 @@ async function handleDelete(id: string) {
                       <td className="px-2 py-2 align-top text-center">
                         <button
                           onClick={(e) => {
-                            e.stopPropagation();           // <- no dispare la edición
+                            e.stopPropagation(); // <- no dispare la edición
                             setDeleteId(exp.id);
                           }}
                           className="text-red-300 hover:text-red-400 transition"
@@ -411,6 +442,7 @@ async function handleDelete(id: string) {
                           🗑️
                         </button>
                       </td>
+
                       {/* Fecha */}
                       <td className="px-2 py-2 align-top whitespace-nowrap">
                         <span className="text-slate-100">
@@ -431,14 +463,16 @@ async function handleDelete(id: string) {
                             </span>
                           </span>
                         ) : (
-                          <span className="text-slate-100">{exp.categoryId}</span>
+                          <span className="text-slate-100">
+                            {exp.categoryId}
+                          </span>
                         )}
                       </td>
 
                       {/* Monto */}
                       <td className="px-2 py-2 align-top text-right whitespace-nowrap">
                         <span className="font-semibold text-slate-50">
-                          ${formatAmountNoCurrency(exp.amount)}
+                          {formatMoney(exp.amount, currency, language)}
                         </span>
                       </td>
 
@@ -464,13 +498,17 @@ async function handleDelete(id: string) {
           )
         )}
       </div>
-      
+
       {/* Modal de creación de nuevo gasto */}
       <NewExpenseModal
         open={isNewExpenseOpen}
         onClose={() => setIsNewExpenseOpen(false)}
         onSuccess={() => setReloadKey((prev) => prev + 1)}
+        // 🆕 pasar moneda/idioma reales para que el input soporte decimales y el label no quede en COP
+        currency={currency}
+        language={language}
       />
+
       {/* Modal de eliminacion de gasto */}
       <DeleteConfirmModal
         open={deleteId !== null}
@@ -481,10 +519,12 @@ async function handleDelete(id: string) {
           setDeleteId(null);
         }}
       />
-            {/* Modal de edición de gasto */}
+
+      {/* Modal de edición de gasto */}
       <EditExpenseModal
         open={isEditOpen}
         expense={editingExpense}
+        language={language}
         onClose={() => {
           setIsEditOpen(false);
           setEditingExpense(null);
@@ -496,7 +536,6 @@ async function handleDelete(id: string) {
           );
         }}
       />
-
     </section>
   );
 }

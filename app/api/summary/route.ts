@@ -58,15 +58,13 @@ export async function GET(request: Request) {
 
     // -----------------------------------------
     // 4. Perfil del usuario en tabla `users`
-    //    - auth_user_id → id de Auth
-    //    - id → user_id interno para `expenses.user_id`
     // -----------------------------------------
     const {
       data: profile,
       error: profileError,
     } = await supabase
       .from("users")
-      .select("id, currency, timezone")
+      .select("id, currency, language, timezone") // 🆕 agregamos language
       .eq("auth_user_id", user.id)
       .single();
 
@@ -83,10 +81,10 @@ export async function GET(request: Request) {
     const appUserId = profile.id;
     const currency = profile.currency;
     const timezone = profile.timezone;
+    const language = profile.language; // 🆕 nueva variable
 
     // -----------------------------------------
     // 5. Consultar gastos usando expense_date (DATE)
-    //    IMPORTANTE: aquí usamos la columna `category`
     // -----------------------------------------
     const {
       data: expenses,
@@ -117,7 +115,6 @@ export async function GET(request: Request) {
     let total = 0;
 
     for (const exp of safeExpenses) {
-      // En BD la columna sigue siendo `category`
       const categoryId = (exp as any).category ?? "otros";
       const amount = Number((exp as any).amount) || 0;
 
@@ -144,6 +141,7 @@ export async function GET(request: Request) {
       {
         total,
         currency,
+        language, // 🆕 ahora enviamos language a la UI
         categories,
         meta: {
           from,

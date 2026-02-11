@@ -10,7 +10,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { formatAmountNoCurrency } from "@/lib/dinvox/expenses-utils";
+import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils"; // ✅
 
 type Props = {
   t1: number;
@@ -22,6 +22,7 @@ type Props = {
   pctT3: number;
 
   currency?: string;
+  language?: string; // ✅ nuevo
   maxHeightPx?: number;
 };
 
@@ -49,6 +50,7 @@ export default function MonthThirdsBarChart({
   pctT2,
   pctT3,
   currency = "COP",
+  language = "es-CO",
   maxHeightPx = 190,
 }: Props) {
   const data: BarItem[] = useMemo(
@@ -73,7 +75,8 @@ export default function MonthThirdsBarChart({
     return 0;
   };
 
-  const moneyLabel = (v: number) => `${formatAmountNoCurrency(v)} ${currency}`;
+  // ✅ Usa símbolo/decimales/locale reales
+  const moneyLabel = (v: number) => formatMoneyUI(v, currency, language);
 
   return (
     <div className="w-full">

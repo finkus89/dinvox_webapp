@@ -22,7 +22,6 @@ import {
   getThirdStates,
   getThirdRangesLabelEs,
   getMonthLabelEs,
-  getMonthEndDay,
 } from "@/lib/analytics/dates";
 import MonthThirdsBarChart from "@/components/performance/MonthThirdsBarChart";
 import type { AnalysisPeriodValue } from "@/components/filters/PeriodFilter";
@@ -31,10 +30,13 @@ import {
   type MonthThirdsInsight,
 } from "@/lib/analytics/insights/monthThirds";
 
+// ✅ helper centralizado (sí respeta símbolo/decimales/locale)
+import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
 
 type MonthThirdsCardProps = {
   period: Extract<AnalysisPeriodValue, "current_month" | "previous_month">;
   fallbackCurrency?: string; // ej "COP"
+  fallbackLanguage?: string; // ✅ ej "es-CO"
   embedded?: boolean;
 };
 
@@ -55,14 +57,6 @@ type ThirdState = "no_iniciado" | "en_curso" | "cerrado";
 // Helpers (formatos UI)
 // -----------------------
 
-// Formato monetario básico (sin depender de Intl si no quieres)
-// Si prefieres Intl, dime y lo cambiamos.
-function formatMoney(amount: number, currency: string) {
-  const rounded = Math.round(amount);
-  const withSep = rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${currency} ${withSep}`;
-}
-
 // Texto para el estado del tercio (copy usuario, no técnico)
 function thirdStateLabel(s: ThirdState) {
   if (s === "no_iniciado") return "Pendiente";
@@ -73,9 +67,9 @@ function thirdStateLabel(s: ThirdState) {
 export default function MonthThirdsCard({
   period,
   fallbackCurrency = "COP",
-  embedded = false, 
+  fallbackLanguage = "es-CO",
+  embedded = false,
 }: MonthThirdsCardProps) {
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,13 +78,12 @@ export default function MonthThirdsCard({
 
   // Calculamos rango del mes actual UNA vez (al montar)
   const anchorDate = useMemo(() => {
-  const d = new Date();
-  // usar día 1 evita bugs por 29/30/31
-  return period === "previous_month"
-    ? new Date(d.getFullYear(), d.getMonth() - 1, 1)
-    : new Date(d.getFullYear(), d.getMonth(), 1);
-}, [period]);
-
+    const d = new Date();
+    // usar día 1 evita bugs por 29/30/31
+    return period === "previous_month"
+      ? new Date(d.getFullYear(), d.getMonth() - 1, 1)
+      : new Date(d.getFullYear(), d.getMonth(), 1);
+  }, [period]);
 
   const from = useMemo(() => getMonthStartYYYYMMDD(anchorDate), [anchorDate]);
   const to = useMemo(() => getMonthEndYYYYMMDD(anchorDate), [anchorDate]);
@@ -113,7 +106,6 @@ export default function MonthThirdsCard({
     const todayDay = getTodayDay(new Date());
     return getThirdStates(todayDay);
   }, [isClosedMonth]);
-
 
   // Fetch real a tu API
   useEffect(() => {
@@ -169,18 +161,16 @@ export default function MonthThirdsCard({
     return computeMonthThirds(analyticsInput);
   }, [analyticsInput]);
 
-
-  //analizmaos el insigth
+  // analizamos el insight
   const insight: MonthThirdsInsight | null = useMemo(() => {
-  if (!metrics) return null;
+    if (!metrics) return null;
 
-  return buildMonthThirdsInsight({
-    metrics,
-    period,
-    monthLabel,
-  });
-}, [metrics, period, monthLabel]);
-
+    return buildMonthThirdsInsight({
+      metrics,
+      period,
+      monthLabel,
+    });
+  }, [metrics, period, monthLabel]);
 
   // Moneda: 1) API (primer gasto), 2) fallback desde Performance, 3) "COP"
   const currency = useMemo(() => {
@@ -188,7 +178,9 @@ export default function MonthThirdsCard({
     return apiCurrency ?? (fallbackCurrency?.toUpperCase?.() ?? "COP");
   }, [expenses, fallbackCurrency]);
 
-  console.log("MonthThirds pct:", metrics?.pctT1, metrics?.pctT2, metrics?.pctT3);
+  // Idioma/locale: viene del perfil en Performance
+  const language = fallbackLanguage ?? "es-CO";
+
   return (
     <div
       className={
@@ -219,11 +211,8 @@ export default function MonthThirdsCard({
         </div>
       )}
 
-
       <div className={embedded ? "" : "mt-5 border-t border-white/15 pt-5"}>
-        {loading && (
-          <p className="text-sm text-white/80">Cargando gastos…</p>
-        )}
+        {loading && <p className="text-sm text-white/80">Cargando gastos…</p>}
 
         {!loading && error && (
           <div className="rounded-2xl border border-red-200/40 bg-red-500/15 p-4">
@@ -244,21 +233,28 @@ export default function MonthThirdsCard({
         )}
 
         {!loading && !error && metrics && (
-          <div className={embedded ? "grid grid-cols-1 md:grid-cols-2 gap-4" : "grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6"}>
+          <div
+            className={
+              embedded
+                ? "grid grid-cols-1 md:grid-cols-2 gap-4"
+                : "grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6"
+            }
+          >
             {/* =========================
                 Columna izquierda: texto útil
                 ========================= */}
             <div className="rounded-2xl border border-white/15 bg-white/10 p-5 space-y-2">
-
               {/* Total del mes (ancla) */}
               <div className="mt-4">
                 <div className="flex items-end justify-between gap-3">
                   <div>
                     <div className="text-xs text-white/70">
-                      {isClosedMonth ? "Gasto total del mes" : "Gasto total del mes a día de hoy"}
+                      {isClosedMonth
+                        ? "Gasto total del mes"
+                        : "Gasto total del mes a día de hoy"}
                     </div>
                     <div className="mt-1 text-2xl font-semibold text-white">
-                      {formatMoney(metrics.totalMonth, currency)}
+                      {formatMoneyUI(metrics.totalMonth, currency, language)}
                     </div>
                   </div>
 
@@ -297,8 +293,9 @@ export default function MonthThirdsCard({
                 <p className="mt-1 text-sm text-white/85">
                   {isClosedMonth ? "Registraste" : "Has registrado"} gastos en{" "}
                   <span className="font-semibold text-white">
-                    {metrics.activeDays} días 
-                  </span> del mes
+                    {metrics.activeDays} días
+                  </span>{" "}
+                  del mes
                   {metrics.firstDayWithExpense
                     ? ` (desde el día ${metrics.firstDayWithExpense}).`
                     : "."}
@@ -312,13 +309,10 @@ export default function MonthThirdsCard({
                   </p>
 
                   {insight.note && (
-                    <p className="mt-1 text-xs text-white/80">
-                      {insight.note}
-                    </p>
+                    <p className="mt-1 text-xs text-white/80">{insight.note}</p>
                   )}
                 </div>
               )}
-
             </div>
 
             {/* =========================
@@ -334,6 +328,7 @@ export default function MonthThirdsCard({
                 pctT2={metrics.pctT2}
                 pctT3={metrics.pctT3}
                 currency={currency}
+                language={language}
               />
             </div>
           </div>

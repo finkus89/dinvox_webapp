@@ -15,20 +15,52 @@ export type ApiExpense = {
   note: string;
 };
 
-// Formato de monto visual con moneda, ej: "$150.000 COP"
-export function formatAmount(value: number, currency: string): string {
-  const formatted = new Intl.NumberFormat("es-CO", {
-    maximumFractionDigits: 0,
-  }).format(value);
-
-  return `$${formatted} ${currency}`;
+// Monedas sin decimales comunes
+function usesZeroDecimals(currency: string) {
+  return ["COP", "CLP", "JPY"].includes((currency ?? "COP").toUpperCase());
 }
 
-// Formato sin moneda, ej: "150.000"
-export function formatAmountNoCurrency(value: number): string {
-  return new Intl.NumberFormat("es-CO", {
-    maximumFractionDigits: 0,
-  }).format(value);
+// ✅ Helper centralizado para formatear dinero correctamente según currency + language
+export function formatMoney(
+  value: number,
+  currency: string,
+  language?: string
+): string {
+  const cur = (currency ?? "COP").toUpperCase();
+  const zeroDecimals = usesZeroDecimals(cur);
+  const locale = language ?? "es-CO";
+
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: cur,
+    minimumFractionDigits: zeroDecimals ? 0 : 2,
+    maximumFractionDigits: zeroDecimals ? 0 : 2,
+  }).format(Number(value) || 0);
+}
+
+// 🔄 Reemplazamos el viejo formatAmount (compat)
+export function formatAmount(
+  value: number,
+  currency: string,
+  language?: string
+): string {
+  return formatMoney(value, currency, language);
+}
+
+// 🔄 Formato sin moneda (pero respetando locale real del usuario)
+export function formatAmountNoCurrency(
+  value: number,
+  currency: string,
+  language?: string
+): string {
+  const cur = (currency ?? "COP").toUpperCase();
+  const zeroDecimals = usesZeroDecimals(cur);
+  const locale = language ?? "es-CO";
+
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: zeroDecimals ? 0 : 2,
+    maximumFractionDigits: zeroDecimals ? 0 : 2,
+  }).format(Number(value) || 0);
 }
 
 // Exportar a CSV (usando los gastos ya cargados en la UI)
@@ -38,26 +70,23 @@ export function exportExpensesToCSV(expenses: ApiExpense[], currency: string) {
     return;
   }
 
-  // Encabezados del CSV
-  const headers = ["Fecha", "Categoría", `Monto (${currency})`, "Nota"];
+  const cur = (currency ?? "COP").toUpperCase();
+  const headers = ["Fecha", "Categoría", `Monto (${cur})`, "Nota"];
 
-  // Filas
   const rows = expenses.map((exp) => {
     const categoryCfg = CATEGORIES[exp.categoryId];
     const categoryLabel = categoryCfg ? categoryCfg.label : exp.categoryId;
 
-    // Escapar comillas en la nota
     const safeNote = (exp.note ?? "").replace(/"/g, '""');
 
     return [
-      exp.date, // ya viene "YYYY-MM-DD"
-      categoryLabel, // nombre legible de la categoría
-      String(exp.amount), // sin formato, para que Excel lo lea como número
-      `"${safeNote}"`, // nota entre comillas
+      exp.date,
+      categoryLabel,
+      String(exp.amount), // sin formato para que Excel lo lea como número real
+      `"${safeNote}"`,
     ].join(",");
   });
 
-  // BOM para que Excel abra bien UTF-8
   const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
 
   const blob = new Blob([csvContent], {

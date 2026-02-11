@@ -27,10 +27,7 @@ function formatName(raw: string): string {
     .trim()
     .split(" ")
     .filter(Boolean)
-    .map(
-      (part) =>
-        part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
-    )
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
 }
 
@@ -40,15 +37,23 @@ function ExpensesPageInner() {
 
   const supabase = createClient();
   const router = useRouter();
+
   // 🔹 Leer filtros iniciales desde la URL (?from=...&to=...&category=...&periodType=...)
   const searchParams = useSearchParams();
   const rawPeriodType = searchParams.get("periodType");
-  const allowedPeriodTypes: PeriodFilterValue[] = ["today", "week", "7d", "month", "prev_month", "range",];
+  const allowedPeriodTypes: PeriodFilterValue[] = [
+    "today",
+    "week",
+    "7d",
+    "month",
+    "prev_month",
+    "range",
+  ];
   const periodTypeParam = allowedPeriodTypes.includes(
-  rawPeriodType as PeriodFilterValue
-)
-  ? (rawPeriodType as PeriodFilterValue)
-  : null;
+    rawPeriodType as PeriodFilterValue
+  )
+    ? (rawPeriodType as PeriodFilterValue)
+    : null;
 
   const fromParam = searchParams.get("from") ?? undefined;
   const toParam = searchParams.get("to") ?? undefined;
@@ -88,9 +93,14 @@ function ExpensesPageInner() {
   // 🔹 Nombre e info para header/sidebar
   const rawName = dbUser?.name ?? "";
   const displayName = rawName ? formatName(rawName) : "";
+
   // Comentario: si en la BD ya guardas "es-co", aquí simplemente lo mostramos
   const languageDisplay = (dbUser?.language ?? "es-co").toUpperCase();
   const currencyDisplay = (dbUser?.currency ?? "COP").toUpperCase();
+
+  // 🆕 Valores “source of truth” para formateo de dinero en la tabla (desde BD)
+  const language = dbUser?.language ?? "es-CO";
+  const currency = dbUser?.currency ?? "COP";
 
   return (
     <div className="h-screen flex bg-slate-100 overflow-hidden">
@@ -144,17 +154,19 @@ function ExpensesPageInner() {
           title="Tabla de gastos"
         />
 
-          {/* CONTENIDO PRINCIPAL usando PageContainer */}
-          <PageContainer>
-            <ExpensesTableCard
-              // Filtros iniciales que vienen desde el Dashboard (si existen)
-              initialPeriodType={periodTypeParam ?? undefined}
-              initialFrom={fromParam}
-              initialTo={toParam}
-              initialCategory={categoryParam}
-            />
-          </PageContainer>
-      
+        {/* CONTENIDO PRINCIPAL usando PageContainer */}
+        <PageContainer>
+          <ExpensesTableCard
+            // 🆕 Perfil (para símbolos/decimales correctos)
+            fallbackCurrency={currency}
+            fallbackLanguage={language}
+            // Filtros iniciales que vienen desde el Dashboard (si existen)
+            initialPeriodType={periodTypeParam ?? undefined}
+            initialFrom={fromParam}
+            initialTo={toParam}
+            initialCategory={categoryParam}
+          />
+        </PageContainer>
       </div>
     </div>
   );

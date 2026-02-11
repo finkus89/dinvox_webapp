@@ -24,6 +24,17 @@ import {
 import { CATEGORIES } from "@/lib/dinvox/categories";
 import type { CategoryId } from "@/lib/dinvox/categories";
 
+// 🆕 Helper central de dinero (currency + language)
+import { formatMoney } from "@/lib/dinvox/expenses-utils";
+
+// -------------------------
+// Props (🆕)
+// -------------------------
+type SummaryCardProps = {
+  fallbackCurrency?: string; // viene del dashboard (users.currency)
+  fallbackLanguage?: string; // viene del dashboard (users.language)
+};
+
 //tipos para gaurdar lo q recibe de la api summary con los datos a graficar
 type SummaryCategoryApi = {
   categoryId: CategoryId;
@@ -34,20 +45,18 @@ type SummaryCategoryApi = {
 type SummaryApiResponse = {
   total: number;
   currency: string;
+  language?: string; // 🆕 ahora puede venir desde /api/summary, pero no es obligatorio
   categories: SummaryCategoryApi[];
   // meta la ignoramos por ahora
 };
 
-// 🔹 Helper simple para formatear montos cortos tipo "$650.000"
-const formatAmountShort = (value: number): string =>
-  `$${new Intl.NumberFormat("es-CO", {
-    maximumFractionDigits: 0,
-  }).format(value)}`;
-
-export default function SummaryCard() {
-
+export default function SummaryCard({
+  fallbackCurrency,
+  fallbackLanguage,
+}: SummaryCardProps) {
   // Router para navegar a la tabla de gastos con filtros
   const router = useRouter();
+
   // 🔹 Estado de período (UN solo objeto en vez de 3 estados separados)
   //    Por defecto usamos "month" con from/to del mes actual
   const [period, setPeriod] = useState<PeriodState>(() => {
@@ -66,8 +75,10 @@ export default function SummaryCard() {
   );
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+
   // 🔹 Flag de UI: si es rango, mostramos el DateRangePicker
   const isRange = period.type === "range";
+
   // 🔹 Cada vez que cambia el período (type, from, to),
   //    llamamos a /api/summary para traer el resumen real.
   useEffect(() => {
@@ -109,25 +120,27 @@ export default function SummaryCard() {
   }, [period]);
 
   // 🔹 Elegimos qué resumen usar en la UI:
-  //    - summaryData → datos reales de la API
-  //    - summaryMock → fallback temporal mientras tanto
   const summaryBase = summaryData;
   const total = summaryBase?.total ?? 0;
-  const currency = summaryBase?.currency ?? "COP";
+
+  // 🆕 Fuente de verdad: API -> fallback -> default
+  const currency =
+    (summaryBase?.currency ?? fallbackCurrency ?? "COP").toUpperCase();
+  const language = summaryBase?.language ?? fallbackLanguage ?? "es-CO";
+
   const categories = summaryBase?.categories ?? [];
 
   // 🔹 Versión corta del total para la dona (ej: "2.8M")
+  // 🆕 separadores según language (sin símbolo)
   const totalShort =
     total >= 1_000_000
       ? `${(total / 1_000_000).toFixed(1)}M`
-      : new Intl.NumberFormat("es-CO", {
+      : new Intl.NumberFormat(language, {
           maximumFractionDigits: 0,
         }).format(total);
 
-  // 🔹 Versión completa para el texto de "Total: ..."
-  const totalFormatted = new Intl.NumberFormat("es-CO", {
-    maximumFractionDigits: 0,
-  }).format(total);
+  // 🆕 Total exacto con símbolo y decimales correctos (EUR/USD 2, COP 0)
+  const totalFormatted = formatMoney(total, currency, language);
 
   // 🔹 Array de segmentos para la dona (mismos colores de categorías)
   const DONUT_SEGMENTS = categories.map((cat) => ({
@@ -139,18 +152,17 @@ export default function SummaryCard() {
   const CATEGORY_BARS_DATA = categories.map((cat) => ({
     categoryId: cat.categoryId,
     name: CATEGORIES[cat.categoryId].label,
-    amount: formatAmountShort(cat.amount),
+    amount: formatMoney(cat.amount, currency, language), // 🆕
     percent: cat.percent,
     color: CATEGORIES[cat.categoryId].color,
   }));
 
-    // 🔹 Ir a la pantalla de "Tabla de gastos" respetando el período actual
+  // 🔹 Ir a la pantalla de "Tabla de gastos" respetando el período actual
   function handleGoToExpenses() {
     const params = new URLSearchParams();
 
-    // Siempre mandamos el tipo de período
     params.set("periodType", period.type);
-    // Si estamos en "rango", mandamos from/to explícitos
+
     if (period.type === "range") {
       if (period.from) params.set("from", period.from);
       if (period.to) params.set("to", period.to);
@@ -164,16 +176,13 @@ export default function SummaryCard() {
   function handleCategoryClick(categoryId: CategoryId) {
     const params = new URLSearchParams();
 
-    // Tipo de período actual
     params.set("periodType", period.type);
 
-    // Si estamos en rango, también mandamos from/to
     if (period.type === "range") {
       if (period.from) params.set("from", period.from);
       if (period.to) params.set("to", period.to);
     }
 
-    // Filtro de categoría
     params.set("category", categoryId);
 
     const qs = params.toString();
@@ -225,9 +234,7 @@ export default function SummaryCard() {
 
           {/* 🔹 Error de summary, si existe */}
           {summaryError && !isLoadingSummary && (
-            <p className="text-[11px] text-red-100/90">
-              {summaryError}
-            </p>
+            <p className="text-[11px] text-red-100/90">{summaryError}</p>
           )}
 
           {/* 🔹 Mensaje breve cuando está actualizando datos */}
@@ -243,15 +250,10 @@ export default function SummaryCard() {
           <PeriodFilter
             value={period.type}
             onChange={(newType) => {
-              // 🔹 Cuando el usuario cambia el período:
-              //    - actualizamos el type
-              //    - si NO es "range", calculamos automáticamente from/to
-              //    - si es "range", dejamos que el usuario ponga from/to manualmente
               if (newType === "range") {
                 setPeriod((prev) => ({
                   ...prev,
                   type: newType,
-                  // dejamos from/to como estén; el usuario los ajustará con el DateRangePicker
                 }));
               } else {
                 const { from, to } = getPeriodDates(newType);
@@ -272,11 +274,9 @@ export default function SummaryCard() {
           from={period.from}
           to={period.to}
           onChangeFrom={(value) =>
-            // 🔹 Actualizamos SOLO la fecha "desde" dentro del estado de período
             setPeriod((prev) => ({ ...prev, from: value }))
           }
           onChangeTo={(value) =>
-            // 🔹 Actualizamos SOLO la fecha "hasta" dentro del estado de período
             setPeriod((prev) => ({ ...prev, to: value }))
           }
         />
@@ -295,8 +295,7 @@ export default function SummaryCard() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* COLUMNA IZQUIERDA: DONA + TOTAL */}
-          {/* COLUMNA IZQUIERDA: DONA + TOTAL + BOTÓN (todo en un solo card) */}
+          {/* COLUMNA IZQUIERDA: DONA + TOTAL + BOTÓN */}
           <div className="lg:col-span-2 flex flex-col">
             <div
               className="
@@ -320,7 +319,7 @@ export default function SummaryCard() {
                   Gasto Total
                 </p>
                 <p className="text-base sm:text-lg font-bold text-slate-100">
-                  {`$${totalFormatted} ${currency}`}
+                  {totalFormatted /* 🆕 ya con símbolo/decimales correctos */}
                 </p>
               </div>
 
@@ -342,7 +341,6 @@ export default function SummaryCard() {
               </button>
             </div>
           </div>
-
 
           {/* COLUMNA DERECHA: CATEGORÍAS CON BARRAS */}
           <CategoryBars

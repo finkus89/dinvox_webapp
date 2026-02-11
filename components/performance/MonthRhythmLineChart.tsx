@@ -1,23 +1,3 @@
-// src/components/performance/MonthRhythmLineChart.tsx
-// -----------------------------------------------------------------------------
-// Mini gráfico de líneas: Ritmo (acumulado) del mes
-//
-// Qué muestra:
-// - Línea "Actual": acumulado día a día del mes seleccionado hasta dayLimit
-// - Línea "Referencia" (baseline): acumulado mediano (si existe) hasta dayLimit
-//
-// Qué usa:
-// - dataset `pace.chart` de computeMonthPace()
-//   [{ day, actual, baseline? }, ...]
-//
-// Nota:
-// - No define colores ni estilos “bonitos” aún.
-// - La referencia se muestra solo si baseline existe.
-// - Todo en una sola figura (sin subplots).
-// -----------------------------------------------------------------------------
-
-// src/components/performance/MonthRhythmLineChart.tsx
-
 "use client";
 
 import {
@@ -32,27 +12,22 @@ import {
 } from "recharts";
 
 import type { MonthPaceChartPoint } from "@/lib/analytics/pace";
-
-function formatMoneyCompact(amount: number): string {
-  const rounded = Math.round(amount);
-  return rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
+import { formatMoney } from "@/lib/dinvox/expenses-utils";
 
 type Props = {
   data: MonthPaceChartPoint[];
   currency: string;
+  language?: string;
 };
 
-export default function MonthRhythmLineChart({ data, currency }: Props) {
+export default function MonthRhythmLineChart({ data, currency, language }: Props) {
   const hasBaseline = (data ?? []).some((d) => typeof d.baseline === "number");
+  const lang = language ?? "es-CO";
 
   return (
     <div className="w-full h-56 sm:h-64">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart
-          data={data}
-          margin={{ top: 12, right: 12, bottom: 8, left: 14 }} // deja respirar ejes
-        >
+        <LineChart data={data} margin={{ top: 12, right: 12, bottom: 8, left: 14 }}>
           <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.25} />
 
           <XAxis
@@ -65,12 +40,12 @@ export default function MonthRhythmLineChart({ data, currency }: Props) {
           />
 
           <YAxis
-            width={88} // más ancho para que no se peguen los números
+            width={92}
             tick={{ fontSize: 12, fill: "rgba(255,255,255,0.75)" }}
             tickMargin={10}
             axisLine={{ stroke: "rgba(255,255,255,0.25)" }}
             tickLine={{ stroke: "rgba(255,255,255,0.25)" }}
-            tickFormatter={(v) => formatMoneyCompact(Number(v))}
+            tickFormatter={(v) => formatMoney(Number(v), currency, lang)}
           />
 
           <Tooltip
@@ -84,7 +59,7 @@ export default function MonthRhythmLineChart({ data, currency }: Props) {
             formatter={(value: any, name: string) => {
               const n = Number(value);
               const label = name === "baseline" ? "Referencia" : "Actual";
-              return [`${currency} ${formatMoneyCompact(n)}`, label];
+              return [formatMoney(n, currency, lang), label];
             }}
             labelFormatter={(label) => `Día ${label}`}
           />
@@ -99,7 +74,6 @@ export default function MonthRhythmLineChart({ data, currency }: Props) {
             )}
           />
 
-          {/* Línea actual */}
           <Line
             type="monotone"
             dataKey="actual"
@@ -110,7 +84,6 @@ export default function MonthRhythmLineChart({ data, currency }: Props) {
             isAnimationActive={false}
           />
 
-          {/* Línea baseline si existe */}
           {hasBaseline && (
             <Line
               type="monotone"
