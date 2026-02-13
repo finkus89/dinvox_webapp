@@ -10,10 +10,16 @@
 // 3. Buscar que el gasto exista y pertenezca al usuario (user_id).
 // 4. Eliminar el gasto.
 // 5. Devolver JSON { success: true }.
+//
+// 🆕 AUTORIZACIÓN (mutación):
+// - En webapp permitimos ver datos aunque can_use=false,
+//   pero NO permitimos mutar (crear/editar/borrar).
+// - Por eso aquí validamos can_use via guardCanMutate() antes de eliminar.
 // -----------------------------------------------------------------------------
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { guardCanMutate } from "@/lib/dinvox/guard-can-mutate";
 
 export async function DELETE(request: Request) {
   try {
@@ -29,19 +35,11 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // 2) Usuario autenticado
-    const supabase = await createClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    // 2) 🆕 Guard centralizado (session + can_use)
+    const guard = await guardCanMutate();
+    if (!guard.ok) return guard.res;
 
-    if (userError || !user) {
-      return NextResponse.json(
-        { error: "No hay usuario autenticado." },
-        { status: 401 }
-      );
-    }
+    const { supabase, user } = guard;
 
     // 3) Borrar SOLO si pertenece al usuario
     const { error: deleteError } = await supabase
@@ -60,10 +58,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    return NextResponse.json(
-      { success: true, id },
-      { status: 200 }
-    );
+    return NextResponse.json({ success: true, id }, { status: 200 });
   } catch (err: any) {
     console.error("Error en DELETE /api/expenses/[id]:", err);
     return NextResponse.json(
@@ -72,7 +67,6 @@ export async function DELETE(request: Request) {
     );
   }
 }
-
 
 // PATCH /api/expenses/:id
 // -----------------------------------------------------------------------------
@@ -89,6 +83,11 @@ export async function DELETE(request: Request) {
 // - Solo se actualizan los campos enviados.
 // - Valida formato básico de fecha y monto.
 // - Respeta RLS: solo se puede modificar un gasto propio.
+//
+// 🆕 AUTORIZACIÓN (mutación):
+// - En webapp permitimos ver datos aunque can_use=false,
+//   pero NO permitimos mutar (crear/editar/borrar).
+// - Por eso aquí validamos can_use via guardCanMutate() antes de actualizar.
 // -----------------------------------------------------------------------------
 export async function PATCH(request: Request) {
   try {
@@ -177,20 +176,11 @@ export async function PATCH(request: Request) {
       updates.note = note ?? null;
     }
 
-    // 5) Cliente Supabase + usuario autenticado
-    const supabase = await createClient();
+    // 5) 🆕 Guard centralizado (session + can_use)
+    const guard = await guardCanMutate();
+    if (!guard.ok) return guard.res;
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return NextResponse.json(
-        { error: "No hay usuario autenticado." },
-        { status: 401 }
-      );
-    }
+    const { supabase, user } = guard;
 
     // 6) Obtener moneda del usuario (igual que en POST)
     const { data: profile, error: profileError } = await supabase
@@ -233,8 +223,8 @@ export async function PATCH(request: Request) {
     // 8) Respuesta alineada con GET/POST
     const responseBody = {
       id: updated.id,
-      date: updated.expense_date,    // YYYY-MM-DD
-      categoryId: updated.category,  // ej: "comida"
+      date: updated.expense_date, // YYYY-MM-DD
+      categoryId: updated.category, // ej: "comida"
       amount: updated.amount,
       currency,
       note: updated.note ?? "",

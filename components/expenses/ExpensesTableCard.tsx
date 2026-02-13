@@ -6,29 +6,34 @@
 // - Llamar al endpoint real `/api/expenses` con:
 //      • from (YYYY-MM-DD)
 //      • to   (YYYY-MM-DD)
-//      • category ("all" o id de categoría)
-// - Reutilizar los mismos filtros que SummaryCard:
-//      • Filtro de período (PeriodFilter + PeriodState de lib/dinvox/periods)
+//      • category (opcional): id de categoría ("comida", "ropa", etc.)
+// - Reutilizar filtros de período y rango:
+//      • PeriodFilter (today/week/7d/month/prev_month/range)
 //      • DateRangePicker cuando el usuario selecciona "range"
-//      • Filtro de categorías (CategoryFilter)
-// - Mostrar un loading overlay mientras se cargan datos.
-// - Mostrar mensaje de error si falla la API.
-// - Mostrar tabla con scroll interno, ordenada por fecha descendente
-//   (el backend ya devuelve orden descendente por expense_date).
-// -----------------------------------------------------------------------------
+// - Reutilizar filtro de categorías (CategoryFilter)
+// - Mostrar overlay de loading mientras se cargan datos
+// - Mostrar mensaje de error si falla la API
+// - Mostrar tabla con scroll interno y filas clickeables para edición
 //
-// ✅ Ajustes mínimos para soportar EUR/USD (decimales) + símbolo correcto:
-// - Usar formatMoney(amount, currency, language)
-// - Pasar fallbackCurrency/fallbackLanguage desde /expenses/page.tsx
-// - No pasar props que NewExpenseModal no soporta (currency/language) para no romper TS
+// MONEDA / IDIOMA (fuente de verdad):
+// - Se leen SIEMPRE desde AppContext (inyectado por app/(app)/layout.tsx)
+// - No dependemos de expenses[0] (porque cuando no hay gastos, eso rompe la UI)
+//
+// NOTA SOBRE MODALES:
+// - DeleteConfirmModal y EditExpenseModal no requieren cambios por esta migración.
+// - NewExpenseModal lo revisamos después (solo verificaremos que soporte currency/language).
+//
+// 🆕 AUTORIZACIÓN (Webapp):
+// - A diferencia de n8n (binario: can_use true/false), en la webapp queremos:
+//    • Ver datos SIEMPRE (tabla + gráficos).
+//    • Mutar (crear/editar/borrar) SOLO si can_use=true.
+// - Por eso derivamos canMutate = canUse desde AppContext.
 // -----------------------------------------------------------------------------
 
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import PeriodFilter, {
-  PeriodFilterValue,
-} from "@/components/filters/PeriodFilter";
+import PeriodFilter, { PeriodFilterValue } from "@/components/filters/PeriodFilter";
 import DateRangePicker from "@/components/filters/DateRangePicker";
 import CategoryFilter from "@/components/filters/CategoryFilter";
 import {
@@ -41,9 +46,7 @@ import { CATEGORIES } from "@/lib/dinvox/categories";
 import type { CategoryId } from "@/lib/dinvox/categories";
 import NewExpenseModal from "@/components/expenses/NewExpenseModal";
 import DeleteConfirmModal from "@/components/expenses/DeleteConfirmModal";
-import EditExpenseModal, {
-  type EditableExpense,
-} from "@/components/expenses/EditExpenseModal";
+import EditExpenseModal, { type EditableExpense } from "@/components/expenses/EditExpenseModal";
 
 import {
   ApiExpense,
@@ -52,17 +55,19 @@ import {
 } from "@/lib/dinvox/expenses-utils";
 import { initPeriodState } from "@/lib/dinvox/period-initializer";
 
+// 🆕 Contexto global (currency + language vienen del layout)
+import { useAppContext } from "@/lib/dinvox/app-context";
+
 // Props opcionales para permitir que otra pantalla (ej. Dashboard)
 // fije el rango inicial de fechas y la categoría al entrar a esta tarjeta.
 interface ExpensesTableCardProps {
   initialFrom?: string; // YYYY-MM-DD (opcional)
   initialTo?: string; // YYYY-MM-DD (opcional)
   initialCategory?: string; // "all" o un CategoryId (opcional)
-  // Tipo de período inicial tal como venga de la URL.
-  // Lo tratamos como string para no pelear con PeriodFilterValue aquí.
   initialPeriodType?: PeriodFilterValue;
 
-  // ✅ Fallbacks para cuando el rango no tiene gastos (y no hay currency en expenses[0])
+  // (Legacy / transición) — si alguna pantalla antigua todavía los pasa.
+  // La fuente de verdad es AppContext; estos sirven como backup temporal.
   fallbackCurrency?: string; // ej: "COP", "EUR"
   fallbackLanguage?: string; // ej: "es-CO", "es-ES"
 }
@@ -78,10 +83,17 @@ export default function ExpensesTableCard({
   fallbackCurrency,
   fallbackLanguage,
 }: ExpensesTableCardProps) {
+  // 🆕 Contexto global (source of truth)
+  const { currency: ctxCurrency, language: ctxLanguage, canUse } = useAppContext();
+
+  // ✅ Webapp: modo lectura vs modo edición
+  // - canUse viene validado por fechas en la RPC.
+  // - En UI lo usamos SOLO para mutaciones (crear/editar/borrar).
+  const canMutate = !!canUse;
+
   // =============================
   // ESTADO: filtros
   // =============================
-  // Inicializacion de periodos
   const [period, setPeriod] = useState<PeriodState>(() =>
     initPeriodState(initialPeriodType, initialFrom, initialTo)
   );
@@ -109,6 +121,24 @@ export default function ExpensesTableCard({
   // ==== ESTADO PARA EDICIÓN ====
   const [editingExpense, setEditingExpense] = useState<ApiExpense | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
+
+  // =============================
+  // DERIVADOS: moneda / idioma
+  // =============================
+  // Fuente de verdad: AppContext.
+  // Los fallbacks quedan SOLO como respaldo temporal si algo llega null.
+  const currency = useMemo(
+    () => (ctxCurrency ?? fallbackCurrency ?? "COP").toUpperCase(),
+    [ctxCurrency, fallbackCurrency]
+  );
+
+  // ✅ OJO: locale debe quedarse tipo "es-CO" (NO .toUpperCase())
+  const language = useMemo(
+    () => ctxLanguage ?? fallbackLanguage ?? "es-CO",
+    [ctxLanguage, fallbackLanguage]
+  );
+
+  const displayCurrency = currency || "COP";
 
   // =============================
   // EFECTO: cargar datos reales
@@ -143,18 +173,19 @@ export default function ExpensesTableCard({
         }
 
         const data: ApiExpense[] = await res.json();
-
         setExpenses(data);
-        // console.log("✅ Expenses desde API:", data);
       } catch (err: any) {
-        if (err.name === "AbortError") {
+        if (err?.name === "AbortError") {
           // petición cancelada al cambiar filtros o desmontar componente
           return;
         }
         console.error("Error al cargar gastos:", err);
         setLoadError(err.message || "Error al cargar los gastos.");
       } finally {
-        setIsLoading(false);
+        // Evita setState “tarde” cuando se aborta por cambio rápido de filtros
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
       }
     }
 
@@ -166,7 +197,7 @@ export default function ExpensesTableCard({
   }, [period.from, period.to, categoryFilter, reloadKey]);
 
   // =============================
-  // DERIVADOS
+  // DERIVADOS: datos
   // =============================
   const hasData = expenses.length > 0;
 
@@ -175,20 +206,13 @@ export default function ExpensesTableCard({
     [expenses]
   );
 
-  // ✅ Fuente de verdad: API -> fallback -> default
-  const currency = (
-    expenses[0]?.currency ??
-    fallbackCurrency ??
-    "COP"
-  ).toUpperCase();
-
-  // ✅ OJO: locale debe quedarse tipo "es-CO" (no .toUpperCase())
-  const language = fallbackLanguage ?? "es-CO";
-
-  const displayCurrency = currency || "COP";
-
-  // funcion de borrar
+  // =============================
+  // ACCIONES
+  // =============================
   async function handleDelete(id: string) {
+    // ✅ Backstop UI: si no puede mutar, no hacemos nada
+    if (!canMutate) return;
+
     try {
       const res = await fetch(`/api/expenses/${id}`, {
         method: "DELETE",
@@ -206,13 +230,14 @@ export default function ExpensesTableCard({
     }
   }
 
-  // Handler para botón de exportar
   function handleExportClick() {
     exportExpensesToCSV(expenses, currency);
   }
 
-  // Cuando el usuario hace clic en una fila -> abrir modal de edición
   function handleRowClick(expense: ApiExpense) {
+    // ✅ Modo lectura: no abrir modal de edición
+    if (!canMutate) return;
+
     setEditingExpense(expense);
     setIsEditOpen(true);
   }
@@ -232,14 +257,7 @@ export default function ExpensesTableCard({
       {/* =======================================================================
       ENCABEZADO: título + info rango + total + FILTROS + BOTONES
       ======================================================================= */}
-      <div
-        className="
-          grid
-          md:grid-cols-3
-          gap-6
-          mb-6
-        "
-      >
+      <div className="grid md:grid-cols-3 gap-6 mb-6">
         {/* ------------------------------------------------------------
             Columna 1 — TEXTO
           ------------------------------------------------------------ */}
@@ -254,26 +272,16 @@ export default function ExpensesTableCard({
                   {expenses.length} gasto{expenses.length !== 1 && "s"}
                 </span>{" "}
                 entre{" "}
-                <span className="font-semibold">
-                  {formatDateHuman(period.from)}
-                </span>{" "}
+                <span className="font-semibold">{formatDateHuman(period.from)}</span>{" "}
                 y{" "}
-                <span className="font-semibold">
-                  {formatDateHuman(period.to)}
-                </span>
-                .
+                <span className="font-semibold">{formatDateHuman(period.to)}</span>.
               </>
             ) : (
               <>
                 No hay gastos registrados entre{" "}
-                <span className="font-semibold">
-                  {formatDateHuman(period.from)}
-                </span>{" "}
+                <span className="font-semibold">{formatDateHuman(period.from)}</span>{" "}
                 y{" "}
-                <span className="font-semibold">
-                  {formatDateHuman(period.to)}
-                </span>
-                .
+                <span className="font-semibold">{formatDateHuman(period.to)}</span>.
               </>
             )}
           </p>
@@ -309,33 +317,37 @@ export default function ExpensesTableCard({
               }
             }}
           />
-          <CategoryFilter
-            value={categoryFilter}
-            onChange={(value) => setCategoryFilter(value)}
-          />
+
+          <CategoryFilter value={categoryFilter} onChange={(value) => setCategoryFilter(value)} />
         </div>
 
         {/* ------------------------------------------------------------
             Columna 3 — BOTONES (Nuevo gasto + export CSV)
           ------------------------------------------------------------ */}
-        <div className=" mt-5    md:mt-5 col-span-1 flex flex-col items-start md:items-center md:justify-center w-auto gap-7">
+        <div className="mt-5 md:mt-5 col-span-1 flex flex-col items-start md:items-center md:justify-center w-auto gap-7">
           <button
-            onClick={() => setIsNewExpenseOpen(true)}
-            className="
+            onClick={() => {
+              // ✅ Modo lectura: no abrir modal de creación
+              if (!canMutate) return;
+              setIsNewExpenseOpen(true);
+            }}
+            disabled={!canMutate}
+            className={`
               w-full md:w-[150px]
               bg-emerald-500/20
-              hover:bg-emerald-500/30
+              ${canMutate ? "hover:bg-emerald-500/30" : "opacity-50 cursor-not-allowed"}
               text-emerald-100
               font-semibold
-              px-3 py-1.5        /* más compacto en mobile */
-              md:px-4 md:py-1.5   /* tamaño normal en desktop */
+              px-3 py-1.5
+              md:px-4 md:py-1.5
               rounded-xl
               border border-emerald-400/20
               backdrop-blur
               transition
               flex items-center gap-2
               text-sm
-            "
+            `}
+            title={!canMutate ? "Modo lectura: no puedes crear gastos" : "Crear nuevo gasto"}
           >
             <span className="text-xl font-bold">+</span> Nuevo gasto
           </button>
@@ -368,14 +380,8 @@ export default function ExpensesTableCard({
           <DateRangePicker
             from={period.from}
             to={period.to}
-            onChangeFrom={(value) =>
-              // 🔹 Actualizamos SOLO la fecha "desde" dentro del estado de período
-              setPeriod((prev) => ({ ...prev, from: value }))
-            }
-            onChangeTo={(value) =>
-              // 🔹 Actualizamos SOLO la fecha "hasta" dentro del estado de período
-              setPeriod((prev) => ({ ...prev, to: value }))
-            }
+            onChangeFrom={(value) => setPeriod((prev) => ({ ...prev, from: value }))}
+            onChangeTo={(value) => setPeriod((prev) => ({ ...prev, to: value }))}
           />
         </div>
       )}
@@ -405,18 +411,12 @@ export default function ExpensesTableCard({
               <thead className="sticky top-0 bg-slate-900/80 backdrop-blur border-b border-white/10">
                 <tr>
                   <th className="px-2 py-2 text-center font-semibold text-slate-100"></th>
-                  <th className="px-2 py-2 text-left font-semibold text-slate-100">
-                    Fecha
-                  </th>
-                  <th className="px-2 py-2 text-left font-semibold text-slate-100">
-                    Categoría
-                  </th>
+                  <th className="px-2 py-2 text-left font-semibold text-slate-100">Fecha</th>
+                  <th className="px-2 py-2 text-left font-semibold text-slate-100">Categoría</th>
                   <th className="px-2 py-2 text-right font-semibold text-slate-100">
                     Monto ({displayCurrency})
                   </th>
-                  <th className="px-2 py-2 text-left font-semibold text-slate-100">
-                    Nota
-                  </th>
+                  <th className="px-2 py-2 text-left font-semibold text-slate-100">Nota</th>
                 </tr>
               </thead>
 
@@ -427,17 +427,33 @@ export default function ExpensesTableCard({
                     <tr
                       key={exp.id}
                       onClick={() => handleRowClick(exp)}
-                      className="border-b border-white/5 last:border-none hover:bg-slate-900/40 cursor-pointer"
+                      className={`
+                        border-b border-white/5 last:border-none
+                        hover:bg-slate-900/40
+                        ${canMutate ? "cursor-pointer" : "cursor-default"}
+                      `}
+                      title={!canMutate ? "Modo lectura: no puedes editar gastos" : undefined}
                     >
-                      {/* Eliminar  */}
+                      {/* Eliminar */}
                       <td className="px-2 py-2 align-top text-center">
                         <button
                           onClick={(e) => {
                             e.stopPropagation(); // <- no dispare la edición
+                            // ✅ Modo lectura: no abrir confirmación de borrado
+                            if (!canMutate) return;
                             setDeleteId(exp.id);
                           }}
-                          className="text-red-300 hover:text-red-400 transition"
-                          title="Eliminar este gasto"
+                          disabled={!canMutate}
+                          className={
+                            canMutate
+                              ? "text-red-300 hover:text-red-400 transition"
+                              : "text-red-300/40 cursor-not-allowed"
+                          }
+                          title={
+                            !canMutate
+                              ? "Modo lectura: no puedes eliminar gastos"
+                              : "Eliminar este gasto"
+                          }
                         >
                           🗑️
                         </button>
@@ -445,9 +461,7 @@ export default function ExpensesTableCard({
 
                       {/* Fecha */}
                       <td className="px-2 py-2 align-top whitespace-nowrap">
-                        <span className="text-slate-100">
-                          {formatDateShort(exp.date)}
-                        </span>
+                        <span className="text-slate-100">{formatDateShort(exp.date)}</span>
                       </td>
 
                       {/* Categoría + color */}
@@ -458,14 +472,10 @@ export default function ExpensesTableCard({
                               className="w-2 h-2 rounded-full"
                               style={{ backgroundColor: categoryCfg.color }}
                             />
-                            <span className="text-slate-100">
-                              {categoryCfg.label}
-                            </span>
+                            <span className="text-slate-100">{categoryCfg.label}</span>
                           </span>
                         ) : (
-                          <span className="text-slate-100">
-                            {exp.categoryId}
-                          </span>
+                          <span className="text-slate-100">{exp.categoryId}</span>
                         )}
                       </td>
 
@@ -504,7 +514,7 @@ export default function ExpensesTableCard({
         open={isNewExpenseOpen}
         onClose={() => setIsNewExpenseOpen(false)}
         onSuccess={() => setReloadKey((prev) => prev + 1)}
-        // 🆕 pasar moneda/idioma reales para que el input soporte decimales y el label no quede en COP
+        // 🆕 (lo revisamos después) currency/language deberían ser soportados por el modal
         currency={currency}
         language={language}
       />
@@ -514,6 +524,9 @@ export default function ExpensesTableCard({
         open={deleteId !== null}
         onCancel={() => setDeleteId(null)}
         onConfirm={async () => {
+          // ✅ Backstop UI: si no puede mutar, no confirmar borrado
+          if (!canMutate) return;
+
           if (!deleteId) return;
           await handleDelete(deleteId);
           setDeleteId(null);
@@ -530,10 +543,8 @@ export default function ExpensesTableCard({
           setEditingExpense(null);
         }}
         onSaved={(updated: EditableExpense) => {
-          // Actualizar la lista local cuando se guarda desde el modal
-          setExpenses((prev) =>
-            prev.map((exp) => (exp.id === updated.id ? updated : exp))
-          );
+          // ✅ Solo debería pasar si canMutate=true (porque no abrimos el modal en modo lectura)
+          setExpenses((prev) => prev.map((exp) => (exp.id === updated.id ? updated : exp)));
         }}
       />
     </section>

@@ -1,22 +1,22 @@
 // lib/dinvox/countries-config.ts
 
-// 🔹 IDs internos de país (fáciles de extender)
-export type CountryId = "CO"; // luego agregas "MX" | "AR" | "US" | etc.
+// 🔹 IDs internos de país
+export type CountryId = "CO" | "ES" | "US";
 
 // 🔹 Configuración base por país
 export interface CountryConfig {
-  id: CountryId;           // Código interno del país
-  name: string;            // Nombre visible (para el dropdown)
-  dialCode: string;        // Indicativo telefónico (+57)
-  iso2: string;            // ISO-2 (para banderas o librerías externas)
-  defaultTimezone: string; // Zona horaria principal
-  currency: string;        // Código de moneda (ISO 4217) -> "COP"
-  currencySymbol: string;  // Símbolo visual -> "$"
-  defaultLanguage: string; // Idioma principal -> "es-CO"
-  flagSrc: string;       // Opcional, para mostrar banderita en el dropdown
+  id: CountryId;
+  name: string;
+  dialCode: string;
+  iso2: string;
+  defaultTimezone: string;
+  currency: string;
+  currencySymbol: string;
+  defaultLanguage: string;
+  flagSrc: string;
 }
 
-// 🔹 MVP: solo Colombia, pero ya con todos los campos listos
+// 🔹 Configuración países soportados
 export const COUNTRIES_CONFIG: Record<CountryId, CountryConfig> = {
   CO: {
     id: "CO",
@@ -29,10 +29,35 @@ export const COUNTRIES_CONFIG: Record<CountryId, CountryConfig> = {
     defaultLanguage: "es-CO",
     flagSrc: "/flags/co.svg",
   },
+
+  ES: {
+    id: "ES",
+    name: "España",
+    dialCode: "+34",
+    iso2: "es",
+    defaultTimezone: "Europe/Madrid",
+    currency: "EUR",
+    currencySymbol: "€",
+    defaultLanguage: "es-ES",
+    flagSrc: "/flags/es.svg",
+  },
+
+  US: {
+  id: "US",
+  name: "Estados Unidos",
+  dialCode: "+1",
+  iso2: "us",
+  defaultTimezone: "America/New_York", // base por defecto (puedes cambiar)
+  currency: "USD",
+  currencySymbol: "$",
+  defaultLanguage: "es-419",
+  flagSrc: "/flags/us.svg",
+},
+
 };
 
-// 🔹 País por defecto (útil en register)
+// 🔹 País por defecto
 export const DEFAULT_COUNTRY_ID: CountryId = "CO";
 
-// 🔹 Lista ya “aplanada” para usar en un <select> o combobox
+// 🔹 Lista para dropdown
 export const COUNTRY_LIST: CountryConfig[] = Object.values(COUNTRIES_CONFIG);

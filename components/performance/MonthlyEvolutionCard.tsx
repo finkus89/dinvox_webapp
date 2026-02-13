@@ -1,3 +1,28 @@
+// src/components/performance/MonthlyEvolutionCard.tsx
+// -----------------------------------------------------------------------------
+// Dinvox | Card: Evolución mensual (Capa 1C)
+//
+// Objetivo:
+// - Mostrar la evolución mes a mes del gasto (total o por categoría) en un rango:
+//    • últimos 6 meses
+//    • últimos 12 meses
+//    • year-to-date
+//
+// Qué hace:
+// 1) Calcula el rango (from/to) en base al período.
+// 2) Descarga gastos reales con UNA llamada a `/api/expenses?from&to`.
+// 3) Normaliza al input mínimo de analytics (date, amount, categoryId).
+// 4) Calcula series e insights con `computeMonthlyEvolution()`.
+// 5) Renderiza filtro de categoría + headline + gráfico.
+//
+// Moneda / idioma:
+// - Fuente de verdad: AppContext (layout).
+// - Respaldo: API (primer gasto) -> fallbacks -> default.
+//
+// Fetch:
+// - Usa AbortController para evitar race conditions (cambio de período/unmount).
+// -----------------------------------------------------------------------------
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -19,6 +44,9 @@ import MonthlyEvolutionLineChart from "@/components/performance/MonthlyEvolution
 // ✅ helper central
 import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
 
+// ✅ contexto global (layout)
+import { useAppContext } from "@/lib/dinvox/app-context";
+
 // -----------------------
 // Props
 // -----------------------
@@ -28,7 +56,7 @@ type MonthlyEvolutionCardProps = {
     "last_6_months" | "last_12_months" | "year_to_date"
   >;
   fallbackCurrency?: string;
-  fallbackLanguage?: string; // ✅
+  fallbackLanguage?: string;
   embedded?: boolean;
 };
 
@@ -56,27 +84,33 @@ function isCategoryId(x: string): x is CategoryId {
   return x in CATEGORIES;
 }
 
-// -----------------------
-// Component
-// -----------------------
 export default function MonthlyEvolutionCard({
   period,
   fallbackCurrency = "COP",
   fallbackLanguage = "es-CO",
   embedded = false,
 }: MonthlyEvolutionCardProps) {
+  // ✅ Hook SIEMPRE se llama (regla de hooks)
+  const { currency: ctxCurrency, language: ctxLanguage } = useAppContext();
+
+  // Datos crudos (para moneda real si existe)
   const [apiExpenses, setApiExpenses] = useState<ApiExpense[]>([]);
+  // Input mínimo para analytics
   const [expenses, setExpenses] = useState<ExpenseForEvolution[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Categoría seleccionada (UI)
   const [category, setCategory] = useState<string | "all">("all");
 
   // -----------------------
   // Rango from / to
   // -----------------------
-  const today = useMemo(() => new Date(), []);
-  const currentMonthKey = getMonthKeyFromDate(today);
+  // Nota: no lo memorizamos con [] porque en sesiones largas se queda “congelado”.
+  const today = new Date();
+
+  const currentMonthKey = useMemo(() => getMonthKeyFromDate(today), [today]);
 
   const fromMonthKey = useMemo(() => {
     if (!currentMonthKey) return null;
@@ -88,10 +122,21 @@ export default function MonthlyEvolutionCard({
     return `${today.getFullYear()}-01`;
   }, [period, currentMonthKey, today]);
 
-  const from = fromMonthKey ? getMonthStartFromMonthKey(fromMonthKey) : null;
-  const to = currentMonthKey ? getMonthEndFromMonthKey(currentMonthKey) : null;
+  const from = useMemo(
+    () => (fromMonthKey ? getMonthStartFromMonthKey(fromMonthKey) : null),
+    [fromMonthKey]
+  );
 
-  // color línea por categoría
+  const to = useMemo(
+    () => (currentMonthKey ? getMonthEndFromMonthKey(currentMonthKey) : null),
+    [currentMonthKey]
+  );
+
+  // -----------------------
+  // Color de la línea (si filtras por categoría)
+  // - Si es "all" o algo inválido, usamos blanco.
+  // - Si es categoría válida, tomamos color de taxonomía.
+  // -----------------------
   const lineColor = useMemo(() => {
     if (category === "all") return "rgba(255,255,255,0.90)";
     if (!isCategoryId(category)) return "rgba(255,255,255,0.90)";
@@ -104,23 +149,32 @@ export default function MonthlyEvolutionCard({
   useEffect(() => {
     if (!from || !to) return;
 
-    let cancelled = false;
+    const controller = new AbortController();
 
     async function load() {
       setLoading(true);
       setError(null);
 
       try {
-        const res = await fetch(`/api/expenses?from=${from}&to=${to}`);
-        if (!res.ok) throw new Error("Error cargando gastos");
+        const res = await fetch(`/api/expenses?from=${from}&to=${to}`, {
+          method: "GET",
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const payload = await res.json().catch(() => null);
+          const msg =
+            payload?.error ??
+            `Error al cargar gastos (${res.status} ${res.statusText}).`;
+          throw new Error(msg);
+        }
 
         const data = (await res.json()) as ApiExpense[];
-
-        if (cancelled) return;
-
         const safe = Array.isArray(data) ? data : [];
+
         setApiExpenses(safe);
 
+        // Normalizamos al formato mínimo para analytics
         setExpenses(
           safe.map((e) => ({
             date: e.date,
@@ -129,29 +183,34 @@ export default function MonthlyEvolutionCard({
           }))
         );
       } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "Error desconocido");
+        if (e?.name === "AbortError") return;
+        setError(e?.message ?? "Error desconocido");
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     }
 
     load();
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [from, to]);
 
   // -----------------------
-  // Moneda + language
+  // Moneda + language (source of truth)
   // -----------------------
+  // currency: AppContext -> API(primer gasto) -> fallback -> default
   const currency = useMemo(() => {
     const apiCurrency = apiExpenses?.[0]?.currency?.toUpperCase?.();
-    return apiCurrency ?? (fallbackCurrency?.toUpperCase?.() ?? "COP");
-  }, [apiExpenses, fallbackCurrency]);
 
-  const language = useMemo(() => {
-    return fallbackLanguage ?? "es-CO";
-  }, [fallbackLanguage]);
+    return (
+      ctxCurrency?.toUpperCase?.() ??
+      apiCurrency ??
+      fallbackCurrency?.toUpperCase?.() ??
+      "COP"
+    );
+  }, [ctxCurrency, apiExpenses, fallbackCurrency]);
+
+  // language: AppContext -> fallback -> default (no uppercase)
+  const language = ctxLanguage ?? fallbackLanguage ?? "es-CO";
 
   // -----------------------
   // Copy dinámico
@@ -178,7 +237,7 @@ export default function MonthlyEvolutionCard({
   }, [expenses, period, category]);
 
   // -----------------------
-  // Headline
+  // Headline (comparación último mes cerrado vs anterior)
   // -----------------------
   const headline = useMemo(() => {
     const hc = evolution.headlineComparison;
@@ -266,7 +325,7 @@ export default function MonthlyEvolutionCard({
           monthDeltaPctByMonthKey={evolution.monthDeltaPctByMonthKey}
           inProgressMonthKey={evolution.inProgressMonthKey}
           currency={currency}
-          language={language} // ✅ pásalo
+          language={language}
           lineColor={lineColor}
         />
       )}

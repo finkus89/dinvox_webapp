@@ -12,6 +12,9 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Dinvox",
   description: "Asistente de registro de gastos por voz.",
+  icons: {
+    icon: "/logo.svg",
+  },
 };
 
 export default function RootLayout({

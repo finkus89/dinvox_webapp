@@ -3,10 +3,14 @@
 // Tarjeta de resumen del dashboard Dinvox.
 // - Usa /api/summary para traer total y categorías del período seleccionado.
 // - Muestra filtro de período, dona y barras por categoría.
+//
+// Fuente de verdad para currency/language:
+// - Se leen SIEMPRE desde AppContext (inyectado por app/(app)/layout.tsx)
+// - /api/summary NO debe “mandar” currency/language para UI (si lo hace, lo ignoramos aquí)
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import CategoryBars from "./CategoryBars";
 import DonutChart from "./DonutChart";
@@ -27,15 +31,12 @@ import type { CategoryId } from "@/lib/dinvox/categories";
 // 🆕 Helper central de dinero (currency + language)
 import { formatMoney } from "@/lib/dinvox/expenses-utils";
 
-// -------------------------
-// Props (🆕)
-// -------------------------
-type SummaryCardProps = {
-  fallbackCurrency?: string; // viene del dashboard (users.currency)
-  fallbackLanguage?: string; // viene del dashboard (users.language)
-};
+// 🆕 Contexto global (currency + language vienen del layout)
+import { useAppContext } from "@/lib/dinvox/app-context";
 
-//tipos para gaurdar lo q recibe de la api summary con los datos a graficar
+// -------------------------
+// Tipos API summary (para graficar)
+// -------------------------
 type SummaryCategoryApi = {
   categoryId: CategoryId;
   amount: number;
@@ -44,18 +45,16 @@ type SummaryCategoryApi = {
 
 type SummaryApiResponse = {
   total: number;
-  currency: string;
-  language?: string; // 🆕 ahora puede venir desde /api/summary, pero no es obligatorio
   categories: SummaryCategoryApi[];
   // meta la ignoramos por ahora
 };
 
-export default function SummaryCard({
-  fallbackCurrency,
-  fallbackLanguage,
-}: SummaryCardProps) {
+export default function SummaryCard() {
   // Router para navegar a la tabla de gastos con filtros
   const router = useRouter();
+
+  // 🆕 Contexto global (source of truth)
+  const { currency: ctxCurrency, language: ctxLanguage } = useAppContext();
 
   // 🔹 Estado de período (UN solo objeto en vez de 3 estados separados)
   //    Por defecto usamos "month" con from/to del mes actual
@@ -69,7 +68,7 @@ export default function SummaryCard({
     };
   });
 
-  /// para la api
+  // Datos de /api/summary
   const [summaryData, setSummaryData] = useState<SummaryApiResponse | null>(
     null
   );
@@ -79,13 +78,20 @@ export default function SummaryCard({
   // 🔹 Flag de UI: si es rango, mostramos el DateRangePicker
   const isRange = period.type === "range";
 
+  // 🆕 Fuente de verdad para formateo (desde layout)
+  // Nota: por seguridad mantenemos defaults si por alguna razón el contexto aún no está listo.
+  const currency = useMemo(
+    () => (ctxCurrency ?? "COP").toUpperCase(),
+    [ctxCurrency]
+  );
+  const language = useMemo(() => ctxLanguage ?? "es-CO", [ctxLanguage]);
+
   // 🔹 Cada vez que cambia el período (type, from, to),
   //    llamamos a /api/summary para traer el resumen real.
   useEffect(() => {
-    // Si no tenemos from/to, no hacemos nada
-    if (!period.from || !period.to) {
-      return;
-    }
+    if (!period.from || !period.to) return;
+
+    const controller = new AbortController();
 
     const fetchSummary = async () => {
       try {
@@ -97,7 +103,9 @@ export default function SummaryCard({
           to: period.to,
         });
 
-        const res = await fetch(`/api/summary?${params.toString()}`);
+        const res = await fetch(`/api/summary?${params.toString()}`, {
+          signal: controller.signal,
+        });
 
         if (!res.ok) {
           const errBody = await res.json().catch(() => null);
@@ -105,57 +113,68 @@ export default function SummaryCard({
         }
 
         const data: SummaryApiResponse = await res.json();
-
         setSummaryData(data);
-        console.log("✅ Summary desde API:", data);
       } catch (err: any) {
+        // Si el fetch se aborta por cambio rápido de filtros, lo ignoramos.
+        if (err?.name === "AbortError") return;
+
         console.error("Error al cargar summary:", err);
         setSummaryError(err.message || "Error al cargar el resumen");
       } finally {
-        setIsLoadingSummary(false);
+        // Evita “parpadeos” raros cuando el fetch fue abortado
+        if (!controller.signal.aborted) {
+          setIsLoadingSummary(false);
+        }
       }
     };
 
     fetchSummary();
+
+    return () => controller.abort();
   }, [period]);
 
-  // 🔹 Elegimos qué resumen usar en la UI:
-  const summaryBase = summaryData;
-  const total = summaryBase?.total ?? 0;
-
-  // 🆕 Fuente de verdad: API -> fallback -> default
-  const currency =
-    (summaryBase?.currency ?? fallbackCurrency ?? "COP").toUpperCase();
-  const language = summaryBase?.language ?? fallbackLanguage ?? "es-CO";
-
-  const categories = summaryBase?.categories ?? [];
+  // 🔹 Resumen activo en UI
+  const total = summaryData?.total ?? 0;
+  const categories = summaryData?.categories ?? [];
 
   // 🔹 Versión corta del total para la dona (ej: "2.8M")
   // 🆕 separadores según language (sin símbolo)
-  const totalShort =
-    total >= 1_000_000
-      ? `${(total / 1_000_000).toFixed(1)}M`
-      : new Intl.NumberFormat(language, {
-          maximumFractionDigits: 0,
-        }).format(total);
+  const totalShort = useMemo(() => {
+    if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(1)}M`;
+
+    return new Intl.NumberFormat(language, {
+      maximumFractionDigits: 0,
+    }).format(total);
+  }, [total, language]);
 
   // 🆕 Total exacto con símbolo y decimales correctos (EUR/USD 2, COP 0)
-  const totalFormatted = formatMoney(total, currency, language);
+  const totalFormatted = useMemo(
+    () => formatMoney(total, currency, language),
+    [total, currency, language]
+  );
 
   // 🔹 Array de segmentos para la dona (mismos colores de categorías)
-  const DONUT_SEGMENTS = categories.map((cat) => ({
-    percent: cat.percent,
-    color: CATEGORIES[cat.categoryId].color,
-  }));
+  const DONUT_SEGMENTS = useMemo(
+    () =>
+      categories.map((cat) => ({
+        percent: cat.percent,
+        color: CATEGORIES[cat.categoryId].color,
+      })),
+    [categories]
+  );
 
   // 🔹 Datos para las barras de categorías, derivados del summary activo
-  const CATEGORY_BARS_DATA = categories.map((cat) => ({
-    categoryId: cat.categoryId,
-    name: CATEGORIES[cat.categoryId].label,
-    amount: formatMoney(cat.amount, currency, language), // 🆕
-    percent: cat.percent,
-    color: CATEGORIES[cat.categoryId].color,
-  }));
+  const CATEGORY_BARS_DATA = useMemo(
+    () =>
+      categories.map((cat) => ({
+        categoryId: cat.categoryId,
+        name: CATEGORIES[cat.categoryId].label,
+        amount: formatMoney(cat.amount, currency, language),
+        percent: cat.percent,
+        color: CATEGORIES[cat.categoryId].color,
+      })),
+    [categories, currency, language]
+  );
 
   // 🔹 Ir a la pantalla de "Tabla de gastos" respetando el período actual
   function handleGoToExpenses() {
@@ -319,7 +338,7 @@ export default function SummaryCard({
                   Gasto Total
                 </p>
                 <p className="text-base sm:text-lg font-bold text-slate-100">
-                  {totalFormatted /* 🆕 ya con símbolo/decimales correctos */}
+                  {totalFormatted}
                 </p>
               </div>
 

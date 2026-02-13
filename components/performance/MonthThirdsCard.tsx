@@ -1,10 +1,27 @@
 // src/components/performance/MonthThirdsCard.tsx
 // ------------------------------------------------------------
-// Capa 1A (v1): Card de "Tercios del mes" (SIN comparar meses aún).
-// - Lee gastos REALES del mes actual desde /api/expenses?from&to
-// - Calcula totales y % por tercio usando computeMonthThirds()
-// - Muestra contexto útil (estado de tercios, total del mes y cobertura)
-// - Renderiza el gráfico a la derecha (desktop) / abajo (mobile)
+// Dinvox | Card: Tercios del mes (Capa 1A)
+//
+// Objetivo:
+// - Mostrar el desempeño del gasto del mes en 3 bloques (1–10 / 11–20 / 21–fin).
+//
+// Responsabilidades de esta card:
+// - Descargar gastos reales del rango del mes (actual o anterior) desde `/api/expenses?from&to`.
+// - Transformar los gastos al formato mínimo del módulo de analytics.
+// - Calcular métricas por tercio con `computeMonthThirds()`.
+// - Renderizar:
+//    • Total del mes (y/o "a día de hoy" si es el mes actual)
+//    • Estados de tercios (Pendiente / En curso / Cerrado)
+//    • Cobertura (días con registros)
+//    • Insight textual (headline + nota)
+//    • Gráfico de barras por tercios
+//
+// Moneda / idioma:
+// - Fuente de verdad: AppContext (layout)
+// - Props fallbackCurrency/fallbackLanguage quedan como respaldo por transición.
+//
+// Fetch:
+// - Usa AbortController para evitar race conditions al cambiar periodo/montaje.
 // ------------------------------------------------------------
 
 "use client";
@@ -30,13 +47,16 @@ import {
   type MonthThirdsInsight,
 } from "@/lib/analytics/insights/monthThirds";
 
-// ✅ helper centralizado (sí respeta símbolo/decimales/locale)
+// ✅ helper centralizado (respeta símbolo/decimales/locale)
 import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
+
+// ✅ contexto global (layout)
+import { useAppContext } from "@/lib/dinvox/app-context";
 
 type MonthThirdsCardProps = {
   period: Extract<AnalysisPeriodValue, "current_month" | "previous_month">;
   fallbackCurrency?: string; // ej "COP"
-  fallbackLanguage?: string; // ✅ ej "es-CO"
+  fallbackLanguage?: string; // ej "es-CO"
   embedded?: boolean;
 };
 
@@ -56,8 +76,6 @@ type ThirdState = "no_iniciado" | "en_curso" | "cerrado";
 // -----------------------
 // Helpers (formatos UI)
 // -----------------------
-
-// Texto para el estado del tercio (copy usuario, no técnico)
 function thirdStateLabel(s: ThirdState) {
   if (s === "no_iniciado") return "Pendiente";
   if (s === "en_curso") return "En curso";
@@ -70,16 +88,20 @@ export default function MonthThirdsCard({
   fallbackLanguage = "es-CO",
   embedded = false,
 }: MonthThirdsCardProps) {
+  // Contexto global (si no existe aún, fallbacks mantienen estabilidad)
+  const app = useAppContext?.();
+  const ctxCurrency = app?.currency;
+  const ctxLanguage = app?.language;
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Datos crudos desde API
   const [expenses, setExpenses] = useState<ApiExpense[]>([]);
 
-  // Calculamos rango del mes actual UNA vez (al montar)
+  // Anchor del mes: día 1 evita bugs por 29/30/31
   const anchorDate = useMemo(() => {
     const d = new Date();
-    // usar día 1 evita bugs por 29/30/31
     return period === "previous_month"
       ? new Date(d.getFullYear(), d.getMonth() - 1, 1)
       : new Date(d.getFullYear(), d.getMonth(), 1);
@@ -97,8 +119,8 @@ export default function MonthThirdsCard({
   const isClosedMonth = period === "previous_month";
 
   // Estados de tercios:
-  // - mes anterior: todo cerrado
-  // - mes actual: según el día real de hoy
+  // - Mes anterior: todo cerrado
+  // - Mes actual: según el día real de hoy
   const thirdStates = useMemo(() => {
     if (isClosedMonth) {
       return { t1: "cerrado", t2: "cerrado", t3: "cerrado" } as const;
@@ -107,9 +129,11 @@ export default function MonthThirdsCard({
     return getThirdStates(todayDay);
   }, [isClosedMonth]);
 
+  // -----------------------
   // Fetch real a tu API
+  // -----------------------
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
     async function load() {
       setLoading(true);
@@ -118,6 +142,7 @@ export default function MonthThirdsCard({
       try {
         const res = await fetch(`/api/expenses?from=${from}&to=${to}`, {
           method: "GET",
+          signal: controller.signal,
         });
 
         if (!res.ok) {
@@ -130,25 +155,23 @@ export default function MonthThirdsCard({
 
         const data = (await res.json()) as ApiExpense[];
 
-        if (!cancelled) {
-          setExpenses(Array.isArray(data) ? data : []);
-        }
+        setExpenses(Array.isArray(data) ? data : []);
       } catch (e: any) {
-        if (!cancelled) {
-          setError(e?.message ?? "Error desconocido al cargar gastos.");
-        }
+        if (e?.name === "AbortError") return; // request cancelada (cambio de periodo / unmount)
+        setError(e?.message ?? "Error desconocido al cargar gastos.");
       } finally {
-        if (!cancelled) setLoading(false);
+        // Si fue abort, no hace falta “corregir” estado; pero este set no rompe.
+        setLoading(false);
       }
     }
 
     load();
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [from, to]);
 
-  // Adaptamos API -> formato del módulo analytics
+  // -----------------------
+  // Transformación a analytics
+  // -----------------------
   const analyticsInput: ExpenseForAnalytics[] = useMemo(() => {
     return (expenses ?? []).map((e) => ({
       date: e.date,
@@ -156,12 +179,10 @@ export default function MonthThirdsCard({
     }));
   }, [expenses]);
 
-  // Ejecutamos el cálculo (puede devolver null si no hay gastos)
   const metrics: MonthThirdsMetrics | null = useMemo(() => {
     return computeMonthThirds(analyticsInput);
   }, [analyticsInput]);
 
-  // analizamos el insight
   const insight: MonthThirdsInsight | null = useMemo(() => {
     if (!metrics) return null;
 
@@ -172,14 +193,22 @@ export default function MonthThirdsCard({
     });
   }, [metrics, period, monthLabel]);
 
-  // Moneda: 1) API (primer gasto), 2) fallback desde Performance, 3) "COP"
+  // -----------------------
+  // Moneda / idioma (source of truth)
+  // -----------------------
+  // currency: API(expenses[0]) -> AppContext -> fallback props -> default
   const currency = useMemo(() => {
     const apiCurrency = expenses?.[0]?.currency?.toUpperCase?.();
-    return apiCurrency ?? (fallbackCurrency?.toUpperCase?.() ?? "COP");
-  }, [expenses, fallbackCurrency]);
+    return (
+      apiCurrency ??
+      (ctxCurrency?.toUpperCase?.() ??
+        fallbackCurrency?.toUpperCase?.() ??
+        "COP")
+    );
+  }, [expenses, ctxCurrency, fallbackCurrency]);
 
-  // Idioma/locale: viene del perfil en Performance
-  const language = fallbackLanguage ?? "es-CO";
+  // language: AppContext -> fallback props -> default
+  const language = ctxLanguage ?? fallbackLanguage ?? "es-CO";
 
   return (
     <div
@@ -195,7 +224,7 @@ export default function MonthThirdsCard({
           `
       }
     >
-      {/* Header de la card (usuario) */}
+      {/* Header de la card (solo si NO está embebida dentro del Accordion) */}
       {!embedded && (
         <div className="flex flex-col gap-1">
           <h3 className="text-xl sm:text-2xl font-semibold tracking-tight">
@@ -240,11 +269,8 @@ export default function MonthThirdsCard({
                 : "grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6"
             }
           >
-            {/* =========================
-                Columna izquierda: texto útil
-                ========================= */}
+            {/* Columna izquierda: texto útil */}
             <div className="rounded-2xl border border-white/15 bg-white/10 p-5 space-y-2">
-              {/* Total del mes (ancla) */}
               <div className="mt-4">
                 <div className="flex items-end justify-between gap-3">
                   <div>
@@ -258,12 +284,11 @@ export default function MonthThirdsCard({
                     </div>
                   </div>
 
-                  {/* Mes visible aquí (no en el gráfico) */}
                   <div className="text-xs text-white/70">{monthLabel}</div>
                 </div>
               </div>
 
-              {/* Estados compactos  */}
+              {/* Estados compactos */}
               <div className="text-xs text-white/85 space-y-1">
                 <div>
                   <span className="font-semibold text-white">
@@ -287,7 +312,7 @@ export default function MonthThirdsCard({
                 </div>
               </div>
 
-              {/* Cobertura del mes (para calibrar confianza) */}
+              {/* Cobertura */}
               <div className="mt-4 pt-4 border-t border-white/15">
                 <div className="text-xs text-white/70">Cobertura</div>
                 <p className="mt-1 text-sm text-white/85">
@@ -315,10 +340,7 @@ export default function MonthThirdsCard({
               )}
             </div>
 
-            {/* =========================
-                Columna derecha: gráfico
-                (por ahora: un solo contenedor, sin header extra)
-                ========================= */}
+            {/* Columna derecha: gráfico */}
             <div className="rounded-2xl border border-white/15 bg-white/10 p-4 sm:p-5">
               <MonthThirdsBarChart
                 t1={metrics.totalT1}

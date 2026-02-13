@@ -29,6 +29,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { guardCanMutate } from "@/lib/dinvox/guard-can-mutate";
 
 export async function GET(request: Request) {
   try {
@@ -137,7 +138,6 @@ export async function GET(request: Request) {
   }
 }
 
-
 // POST /api/expenses
 // -----------------------------------------------------------------------------
 // Crea un nuevo gasto manual para el usuario autenticado.
@@ -156,6 +156,11 @@ export async function GET(request: Request) {
 //   {
 //     id, date, categoryId, amount, currency, note
 //   }
+//
+// 🆕 AUTORIZACIÓN (mutación):
+// - En webapp permitimos ver datos aunque can_use=false,
+//   pero NO permitimos mutar (crear/editar/borrar).
+// - Por eso aquí validamos can_use via guardCanMutate() antes de insertar.
 // -----------------------------------------------------------------------------
 export async function POST(request: Request) {
   try {
@@ -202,20 +207,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2) Cliente Supabase + usuario autenticado
-    const supabase = await createClient();
+    // 2) 🆕 Guard centralizado (session + can_use)
+    const guard = await guardCanMutate();
+    if (!guard.ok) return guard.res;
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return NextResponse.json(
-        { error: "No hay usuario autenticado." },
-        { status: 401 }
-      );
-    }
+    const { supabase, user } = guard;
 
     // 3) Obtener perfil (id interno y moneda)
     const { data: profile, error: profileError } = await supabase
@@ -266,8 +262,8 @@ export async function POST(request: Request) {
     // 5) Formato de respuesta alineado con el GET
     const responseBody = {
       id: inserted.id,
-      date: inserted.expense_date,       // YYYY-MM-DD
-      categoryId: inserted.category,     // ej: "comida"
+      date: inserted.expense_date, // YYYY-MM-DD
+      categoryId: inserted.category, // ej: "comida"
       amount: inserted.amount,
       currency,
       note: inserted.note ?? "",

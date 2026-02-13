@@ -1,31 +1,39 @@
 // src/components/performance/MonthRhythmCard.tsx
 // -----------------------------------------------------------------------------
-// Capa 1B (v1): Card de "Ritmo del mes"
-// - Lee gastos REALES en un rango amplio desde /api/expenses?from&to
-// - Calcula ritmo del mes usando computeMonthPace() (analytics/pace.ts)
-// - Muestra:
-//   - Estado (Contenido / Normal / Acelerado) cuando hay baseline
-//   - Confianza (Sólida / Preliminar / Sin referencia)
-//   - R (x) y delta %
-//   - Fallback cuando NO hay baseline: promedio diario hasta hoy
+// Dinvox | Card: Ritmo del mes (Capa 1B)
 //
-// IMPORTANTE:
-// - No hace comparaciones en backend: todo es UI + analytics.
-// - No modifica nada de Tercios.
-// - Para baseline necesita data de (mes seleccionado + 3 meses previos).
+// Objetivo:
+// - Medir el "ritmo" del gasto del mes comparándolo contra una referencia reciente
+//   (baseline: meses previos) para detectar si el usuario va:
+//     • Contenido • Normal • Acelerado
 //
-// Este componente se usará en:
-// - src/app/performance/page.tsx dentro de la sección "rhythm"
+// Qué hace:
+// - Descarga gastos reales de un rango amplio: (mes seleccionado + 3 meses previos)
+//   usando `/api/expenses?from&to`.
+// - Calcula métricas con `computeMonthPace()` (analytics/pace.ts).
+// - Renderiza:
+//    • Estado (Contenido/Normal/Acelerado) si hay baseline
+//    • Confianza (Sólida/Preliminar/Sin referencia)
+//    • Ritmo R (x) y delta % vs baseline
+//    • Fallback sin baseline: promedio diario actual
+//    • Gráfico acumulado actual vs baseline (si existe)
 //
-// Próximo paso (separado):
-// - Agregar gráfico de líneas actual vs baseline (MonthRhythmLineChart)
+// Moneda / idioma:
+// - Fuente de verdad: AppContext (layout).
+// - Respaldo: API (primer gasto) -> fallbacks -> default.
+//
+// Fetch:
+// - Usa AbortController para evitar race conditions al cambiar periodo/montaje.
 // -----------------------------------------------------------------------------
 
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import type { AnalysisPeriodValue } from "@/components/filters/PeriodFilter";
-import { computeMonthPace, DEFAULT_MONTH_PACE_CONFIG } from "@/lib/analytics/pace";
+import {
+  computeMonthPace,
+  DEFAULT_MONTH_PACE_CONFIG,
+} from "@/lib/analytics/pace";
 import type { ExpenseForAnalytics } from "@/lib/analytics/tercios";
 import MonthRhythmLineChart from "@/components/performance/MonthRhythmLineChart";
 import {
@@ -40,6 +48,9 @@ import {
 // ✅ helper central (moneda + decimales + locale)
 import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
 
+// ✅ contexto global (layout)
+import { useAppContext } from "@/lib/dinvox/app-context";
+
 // -----------------------
 // Tipos (alineado con /api/expenses)
 // -----------------------
@@ -47,7 +58,7 @@ import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
 type MonthRhythmCardProps = {
   period: Extract<AnalysisPeriodValue, "current_month" | "previous_month">;
   fallbackCurrency?: string; // ej "COP"
-  fallbackLanguage?: string; // ✅ ej "es-CO" | "es-ES" | "en-US" | "en-CA"
+  fallbackLanguage?: string; // ej "es-CO" | "es-ES" | "en-US" | "en-CA"
   embedded?: boolean;
 };
 
@@ -61,7 +72,7 @@ type ApiExpense = {
 };
 
 // -----------------------
-// Helpers UI (misma idea que en Tercios)
+// Helpers UI
 // -----------------------
 
 function formatPctSigned(pct: number): string {
@@ -87,13 +98,17 @@ export default function MonthRhythmCard({
   fallbackLanguage = "es-CO",
   embedded = false,
 }: MonthRhythmCardProps) {
+  // ✅ Hook SIEMPRE se llama (regla de hooks)
+  // Fuente de verdad para moneda/idioma.
+  const { currency: ctxCurrency, language: ctxLanguage } = useAppContext();
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Datos crudos desde API
   const [expenses, setExpenses] = useState<ApiExpense[]>([]);
 
-  // Anchor date (igual patrón que en Tercios)
+  // Anchor date:
   // - previous_month: mes anterior (día 1)
   // - current_month: mes actual (día 1)
   const anchorDate = useMemo(() => {
@@ -103,10 +118,9 @@ export default function MonthRhythmCard({
       : new Date(d.getFullYear(), d.getMonth(), 1);
   }, [period]);
 
-  // month label visible en UI (ej: "Ene 2026")
   const monthLabel = useMemo(() => getMonthLabelEs(anchorDate), [anchorDate]);
 
-  // Rango del mes seleccionado (para to / cálculo dayLimit)
+  // Rango del mes seleccionado (para dayLimit y to)
   const selectedFrom = useMemo(
     () => getMonthStartYYYYMMDD(anchorDate),
     [anchorDate]
@@ -116,48 +130,42 @@ export default function MonthRhythmCard({
     [anchorDate]
   );
 
-  // monthKey del mes seleccionado (YYYY-MM), inferido desde selectedFrom ("YYYY-MM-01")
+  // monthKey del mes seleccionado (YYYY-MM)
   const selectedMonthKey = useMemo(() => {
     return getMonthKeyFromYYYYMMDD(selectedFrom) ?? "unknown";
   }, [selectedFrom]);
 
   // -----------------------
-  // Rango amplio para traer data (mes seleccionado + 3 previos)
+  // Rango amplio: mes seleccionado + 3 previos
   // -----------------------
-  // from = inicio del mes (M-3)
-  // to   = fin del mes seleccionado (para previous_month) o fin del mes actual (para current_month)
   const wideFrom = useMemo(() => {
     if (selectedMonthKey === "unknown") return selectedFrom;
     const mk = shiftMonthKey(selectedMonthKey, -3);
-    // Si por alguna razón falla, caemos al mes seleccionado
     return mk ? `${mk}-01` : selectedFrom;
   }, [selectedMonthKey, selectedFrom]);
 
   const wideTo = useMemo(() => selectedTo, [selectedTo]);
 
   // -----------------------
-  // dayLimit (A): a ese día exacto
-  // - Mes actual: hoy (día del mes)
+  // dayLimit:
+  // - Mes actual: hoy
   // - Mes anterior: fin de mes (porque ya cerró)
   // -----------------------
   const dayLimit = useMemo(() => {
     if (period === "previous_month") {
-      // aquí el cálculo clamp se hace en pace.ts, pero igual intentamos ser coherentes
-      // usando el último día del mes seleccionado (extraído de selectedTo).
       const endDay = Number(selectedTo.slice(8, 10));
       return Number.isFinite(endDay) && endDay > 0 ? endDay : 1;
     }
 
-    // mes actual: hoy
     const today = getTodayDay(new Date());
     return today >= 1 ? today : 1;
   }, [period, selectedTo]);
 
   // -----------------------
-  // Fetch: 1 sola llamada a /api/expenses con rango amplio
+  // Fetch (1 llamada) a /api/expenses con rango amplio
   // -----------------------
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
     async function load() {
       setLoading(true);
@@ -166,6 +174,7 @@ export default function MonthRhythmCard({
       try {
         const res = await fetch(`/api/expenses?from=${wideFrom}&to=${wideTo}`, {
           method: "GET",
+          signal: controller.signal,
         });
 
         if (!res.ok) {
@@ -177,23 +186,17 @@ export default function MonthRhythmCard({
         }
 
         const data = (await res.json()) as ApiExpense[];
-
-        if (!cancelled) {
-          setExpenses(Array.isArray(data) ? data : []);
-        }
+        setExpenses(Array.isArray(data) ? data : []);
       } catch (e: any) {
-        if (!cancelled) {
-          setError(e?.message ?? "Error desconocido al cargar gastos.");
-        }
+        if (e?.name === "AbortError") return;
+        setError(e?.message ?? "Error desconocido al cargar gastos.");
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     }
 
     load();
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [wideFrom, wideTo]);
 
   // -----------------------
@@ -216,21 +219,26 @@ export default function MonthRhythmCard({
       expenses: analyticsInput,
       selectedMonthKey,
       dayLimit,
-      // puedes ajustar thresholds aquí si un día quieres
       config: DEFAULT_MONTH_PACE_CONFIG,
     });
   }, [analyticsInput, selectedMonthKey, dayLimit]);
 
-  // Moneda: 1) API (primer gasto), 2) fallback, 3) "COP"
+  // -----------------------
+  // Moneda / idioma (source of truth: AppContext)
+  // -----------------------
   const currency = useMemo(() => {
     const apiCurrency = expenses?.[0]?.currency?.toUpperCase?.();
-    return apiCurrency ?? (fallbackCurrency?.toUpperCase?.() ?? "COP");
-  }, [expenses, fallbackCurrency]);
 
-  // ✅ locale real para Intl (NO uppercase)
-  const language = useMemo(() => {
-    return fallbackLanguage ?? "es-CO";
-  }, [fallbackLanguage]);
+    return (
+      ctxCurrency?.toUpperCase?.() ??
+      apiCurrency ??
+      fallbackCurrency?.toUpperCase?.() ??
+      "COP"
+    );
+  }, [ctxCurrency, expenses, fallbackCurrency]);
+
+  // ✅ language: AppContext -> fallback -> default (no uppercase)
+  const language = ctxLanguage ?? fallbackLanguage ?? "es-CO";
 
   // -----------------------
   // Render
@@ -249,11 +257,12 @@ export default function MonthRhythmCard({
           `
       }
     >
-      {/* Header (si no está embebida) */}
       {!embedded && (
         <div className="flex flex-col gap-1">
           <h3 className="text-xl sm:text-2xl font-semibold tracking-tight">
-            {period === "previous_month" ? "Ritmo del mes anterior" : "Ritmo del mes"}
+            {period === "previous_month"
+              ? "Ritmo del mes anterior"
+              : "Ritmo del mes"}
           </h3>
           <p className="text-sm text-white/80">
             {period === "previous_month"
@@ -275,7 +284,9 @@ export default function MonthRhythmCard({
 
         {!loading && !error && !pace && (
           <div className="rounded-2xl border border-white/15 bg-white/10 p-4">
-            <p className="text-sm font-semibold text-white">No se pudo calcular el ritmo</p>
+            <p className="text-sm font-semibold text-white">
+              No se pudo calcular el ritmo
+            </p>
             <p className="text-sm text-white/80 mt-1">
               Revisa que exista data para el mes {monthLabel}.
             </p>
@@ -290,17 +301,13 @@ export default function MonthRhythmCard({
                 : "grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6"
             }
           >
-            {/* =========================
-                Columna izquierda: números + estado
-                ========================= */}
+            {/* Columna izquierda: números + estado */}
             <div className="rounded-2xl border border-white/15 bg-white/10 p-5 space-y-2">
-              {/* Mes */}
               <div className="flex items-center justify-between">
                 <div className="text-xs text-white/70">Mes</div>
                 <div className="text-xs text-white/70">{monthLabel}</div>
               </div>
 
-              {/* Confianza */}
               <div className="mt-2 flex items-center justify-between gap-3">
                 <div className="text-xs text-white/70">Confianza</div>
                 <div className="text-xs font-semibold text-white">
@@ -308,7 +315,6 @@ export default function MonthRhythmCard({
                 </div>
               </div>
 
-              {/* Resultado principal */}
               {pace.R != null && pace.deltaPct != null && pace.status != null ? (
                 <div className="mt-4">
                   <div className="text-xs text-white/70">Estado</div>
@@ -341,38 +347,45 @@ export default function MonthRhythmCard({
                     </div>
                   </div>
 
-                  {/* Tooltip / tabla de umbrales (simple, sin UI compleja aún) */}
                   <div className="mt-4 pt-4 border-t border-white/15">
                     <div className="text-xs text-white/70">Cómo va tu gasto</div>
                     <div className="mt-2 text-xs text-white/80 space-y-1">
                       <div>
-                        <span className="font-semibold text-white">Gasto contenido:</span>{" "}
+                        <span className="font-semibold text-white">
+                          Gasto contenido:
+                        </span>{" "}
                         R &lt; {DEFAULT_MONTH_PACE_CONFIG.thresholdContenido}
                       </div>
                       <div>
-                        <span className="font-semibold text-white">Gasto normal:</span>{" "}
+                        <span className="font-semibold text-white">
+                          Gasto normal:
+                        </span>{" "}
                         {DEFAULT_MONTH_PACE_CONFIG.thresholdContenido} –{" "}
                         {DEFAULT_MONTH_PACE_CONFIG.thresholdAcelerado}
                       </div>
                       <div>
-                        <span className="font-semibold text-white">Gasto acelerado:</span>{" "}
+                        <span className="font-semibold text-white">
+                          Gasto acelerado:
+                        </span>{" "}
                         R &gt; {DEFAULT_MONTH_PACE_CONFIG.thresholdAcelerado}
                       </div>
                     </div>
                   </div>
                 </div>
               ) : (
-                // Fallback: sin baseline (o baseline inválido)
                 <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 p-4">
                   <p className="text-sm font-semibold text-white">
                     Aún no hay referencia suficiente
                   </p>
                   <p className="mt-1 text-xs text-white/80">
-                    Este mes será tu referencia inicial. Por ahora te mostramos tu promedio diario.
+                    Este mes será tu referencia inicial. Por ahora te mostramos
+                    tu promedio diario.
                   </p>
 
                   <div className="mt-4 flex items-center justify-between gap-3">
-                    <div className="text-xs text-white/70">Promedio diario (a la fecha)</div>
+                    <div className="text-xs text-white/70">
+                      Promedio diario (a la fecha)
+                    </div>
                     <div className="text-lg font-semibold text-white">
                       {formatMoneyUI(pace.avgDailyActual, currency, language)}
                     </div>
@@ -381,23 +394,28 @@ export default function MonthRhythmCard({
               )}
             </div>
 
-            {/* =========================
-                Columna derecha: gráfico (placeholder por ahora)
-                ========================= */}
+            {/* Columna derecha: gráfico */}
             <div className="rounded-2xl border border-white/15 bg-white/10 p-4 sm:p-5">
-              <div className="text-sm font-semibold text-white">Ritmo (acumulado)</div>
+              <div className="text-sm font-semibold text-white">
+                Ritmo (acumulado)
+              </div>
               <p className="mt-1 text-xs text-white/80">
                 Comparación del acumulado diario vs referencia (si existe).
               </p>
 
               <div className="mt-4">
-                {/* ✅ luego revisamos este chart: probablemente también necesite language */}
-                <MonthRhythmLineChart data={pace.chart} currency={currency} language={language} />
+                <MonthRhythmLineChart
+                  data={pace.chart}
+                  currency={currency}
+                  language={language}
+                />
               </div>
 
               <div className="mt-3 text-xs text-white/70">
                 Día analizado:{" "}
-                <span className="text-white/90 font-semibold">{pace.dayLimit}</span>
+                <span className="text-white/90 font-semibold">
+                  {pace.dayLimit}
+                </span>
                 {" • "}
                 Acumulado:{" "}
                 <span className="text-white/90 font-semibold">
