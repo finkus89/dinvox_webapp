@@ -2,6 +2,7 @@
 // ---------------------------------------------
 // Lista de categorías con barras horizontales
 // Reutilizable en el dashboard (solo UI, sin lógica de datos)
+import { CATEGORIES } from "@/lib/dinvox/categories";
 import type { CategoryId } from "@/lib/dinvox/categories";
 
 interface CategoryBarItem {
@@ -36,6 +37,12 @@ export default function CategoryBars({ data, onCategoryClick }: CategoryBarsProp
         {data.map((cat) => {
           const relativeWidth = (cat.percent / maxPercent) * 100;
 
+          // ✅ ARREGLO (UI):
+          // - Mostrar emoji junto al label (fuente de verdad: CATEGORIES).
+          // - Fallback a cat.name por seguridad si algo no está en config.
+          const cfg = CATEGORIES[cat.categoryId];
+          const label = `${cfg?.emoji ?? ""} ${cfg?.label ?? cat.name}`.trim();
+
           return (
             <button
               key={cat.categoryId}
@@ -44,8 +51,8 @@ export default function CategoryBars({ data, onCategoryClick }: CategoryBarsProp
               className="w-full text-left space-y-1 rounded-lg hover:bg-slate-900/30 transition cursor-pointer"
             >
               {/* Primera línea: nombre + monto + porcentaje en la misma fila */}
-              <div className="flex items-center justify-between text-[11px] sm:text-xs">
-                <span className="text-slate-200 truncate">{cat.name}</span>
+              <div className="flex items-center justify-between text-xs sm:text-sm">
+                <span className="text-slate-200 truncate">{label}</span>
 
                 <div className="flex items-center gap-2 text-right">
                   <span className="text-slate-100 font-medium">
@@ -63,7 +70,7 @@ export default function CategoryBars({ data, onCategoryClick }: CategoryBarsProp
                   className="h-full rounded-full"
                   style={{
                     width: `${relativeWidth}%`,
-                    backgroundColor: cat.color ?? "#22c55e", // fallback emerald
+                    backgroundColor: cat.color ?? cfg?.color ?? "#22c55e", // fallback emerald
                   }}
                 />
               </div>

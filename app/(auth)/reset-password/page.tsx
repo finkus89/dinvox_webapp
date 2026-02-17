@@ -24,6 +24,9 @@ import { useRouter } from "next/navigation";
 // Cliente Supabase (browser)
 import { createClient } from "@/lib/supabase/browser";
 
+// 🆕 Helper reutilizable para submit lock + loading garantizado
+import { runSubmit } from "@/lib/auth/form-helpers";
+
 export default function ResetPasswordPage() {
   const supabase = createClient();
   const router = useRouter();
@@ -91,6 +94,11 @@ export default function ResetPasswordPage() {
     e.preventDefault();
     if (loading || !ready) return;
 
+    // --------------------------------------------------
+    // ✅ ARREGLO / REFACTOR:
+    // - Validamos primero (sin loading).
+    // - runSubmit controla loading + evita doble envío + garantiza finally.
+    // --------------------------------------------------
     setError(null);
 
     if (password.length < 8) {
@@ -103,8 +111,7 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    setLoading(true);
-    try {
+    await runSubmit(loading, setLoading, async () => {
       const { error } = await supabase.auth.updateUser({ password });
 
       if (error) {
@@ -115,9 +122,7 @@ export default function ResetPasswordPage() {
       // Cerrar sesión recovery y redirigir a login
       await supabase.auth.signOut();
       router.replace("/login");
-    } finally {
-      setLoading(false);
-    }
+    });
   }
 
   return (

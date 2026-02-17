@@ -1,11 +1,22 @@
 "use client";
 
-/* 
-  Página de registro de Dinvox (versión completa con registro real)
-  ---------------------------------------------------------------
-  - Mantiene 100% tu UI actual sin tocar nada visual.
-  - Agrega validaciones, normalizaciones y conexión con Supabase Auth.
-  - Manejo de errores por campo y error global.
+/*
+  Página de registro de Dinvox (registro real)
+  --------------------------------------------
+  Qué hace esta pantalla:
+  - Crea el usuario en Supabase Auth (email + password).
+  - Guarda datos de perfil en Auth como user_metadata (auth.users.raw_user_meta_data).
+    Ej: name, phone_e164, channel, currency, timezone, etc.
+
+  Importante (flujo de Dinvox hoy):
+  - Esta pantalla NO crea la fila en public.users.
+  - La fila en public.users se crea en el PRIMER LOGIN (ver LoginPage):
+    - Ahí se lee user.user_metadata y se inserta la fila en public.users.
+    - Por eso, lo que guardemos aquí en user_metadata (como channel) luego se copia a la BD.
+
+  Cambio nuevo en esta versión:
+  - Se agrega selector de CANAL (WhatsApp / Telegram) debajo del celular.
+  - El canal seleccionado se guarda en user_metadata.channel (antes estaba fijo en "telegram").
 */
 
 import { useState } from "react";
@@ -18,6 +29,9 @@ import {
   COUNTRY_LIST,
   type CountryConfig,
 } from "@/lib/dinvox/countries-config";
+
+// 🆕 Helpers para evitar duplicación y bugs de submit
+import { runSubmit, normalizeEmail, isValidEmail } from "@/lib/auth/form-helpers";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -38,6 +52,9 @@ export default function RegisterPage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 🆕 Canal elegido (se guarda en user_metadata.channel)
+  // Nota: dejamos default en "telegram" por continuidad con el flujo actual.
+  const [channel, setChannel] = useState<"telegram" | "whatsapp">("whatsapp");
 
   // ================================
   // ERRORES POR CAMPO
@@ -49,7 +66,6 @@ export default function RegisterPage() {
   const [errorGeneral, setErrorGeneral] = useState("");
   const [errorTerms, setErrorTerms] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
-
 
   // Limpieza automática al escribir
   const clearErrors = () => {
@@ -65,8 +81,11 @@ export default function RegisterPage() {
   //   FUNCIÓN PRINCIPAL DE REGISTRO (maneja TODO)
   // ======================================================
   const handleRegister = async () => {
-    if (isSubmitting) return;
-     setIsSubmitting(true);
+    // --------------------------------------------------
+    // ✅ ARREGLO (bug "se queda cargando"):
+    // - Validamos primero (sin loading).
+    // - runSubmit se encarga del lock + loading + finally.
+    // --------------------------------------------------
     clearErrors();
 
     // ============================
@@ -82,10 +101,7 @@ export default function RegisterPage() {
     }
 
     // Normalizar nombre (minúsculas + trim + espacios simples)
-    const normalizedName = name
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, " ");
+    const normalizedName = name.toLowerCase().trim().replace(/\s+/g, " ");
 
     // ============================
     // VALIDACIONES — EMAIL
@@ -95,10 +111,8 @@ export default function RegisterPage() {
       return;
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
-
-    const emailRegex = /\S+@\S+\.\S+/;
-    if (!emailRegex.test(normalizedEmail)) {
+    const normalizedEmail = normalizeEmail(email);
+    if (!isValidEmail(normalizedEmail)) {
       setErrorEmail("Correo inválido.");
       return;
     }
@@ -140,68 +154,72 @@ export default function RegisterPage() {
     }
 
     // ======================================================
-    // 1) CREAR USUARIO EN SUPABASE AUTH
+    // SUBMIT (con lock + loading garantizado)
     // ======================================================
-    const origin = window.location.origin;
+    await runSubmit(isSubmitting, setIsSubmitting, async () => {
+      // ======================================================
+      // 1) CREAR USUARIO EN SUPABASE AUTH
+      // ======================================================
+      const origin = window.location.origin;
 
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: normalizedEmail,
-      password,
-      options: {
-        emailRedirectTo: `${origin}/auth/callback`,
-        data: {   // 👈 AQUÍ guardamos el perfil en user_metadata
-          name: normalizedName,
-          phone_country_code: currentCountry.dialCode,
-          phone_national: cleanPhone,
-          phone_e164,
-          channel: "telegram",
-          language: currentCountry.defaultLanguage,
-          currency: currentCountry.currency,
-          timezone: currentCountry.defaultTimezone,
-          terms_accepted_at: new Date().toISOString(),
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          emailRedirectTo: `${origin}/auth/callback`,
+          data: {
+            // 👇 Todo esto queda en auth.users.raw_user_meta_data (user_metadata)
+            name: normalizedName,
+            phone_country_code: currentCountry.dialCode,
+            phone_national: cleanPhone,
+            phone_e164,
+
+            // 🆕 Guardar canal elegido (antes estaba fijo en "telegram")
+            channel,
+
+            language: currentCountry.defaultLanguage,
+            currency: currentCountry.currency,
+            timezone: currentCountry.defaultTimezone,
+            terms_accepted_at: new Date().toISOString(),
+          },
         },
-      },
-    });
+      });
 
-    if (authError) {
-      const rawMsg = (authError.message || "").toLowerCase();
+      if (authError) {
+        const rawMsg = (authError.message || "").toLowerCase();
 
-      if (
-        rawMsg.includes("already registered") ||
-        rawMsg.includes("already exists")
-      ) {
-        // correo ya usado en Auth
-        setErrorEmail("Ya existe una cuenta con este correo. Intenta iniciar sesión.");
-      } else {
-        setErrorGeneral(
-          authError.message || "No se pudo crear la cuenta. Inténtalo de nuevo."
-        );
+        if (rawMsg.includes("already registered") || rawMsg.includes("already exists")) {
+          // correo ya usado en Auth
+          setErrorEmail("Ya existe una cuenta con este correo. Intenta iniciar sesión.");
+        } else {
+          setErrorGeneral(authError.message || "No se pudo crear la cuenta. Inténtalo de nuevo.");
+        }
+        return;
       }
-      return;
-    }
 
-    const authUserId = authData.user?.id;
-    if (!authUserId) {
-      setErrorGeneral("No se pudo obtener el usuario después del registro.");
-      return;
-    }
+      const authUserId = authData.user?.id;
+      if (!authUserId) {
+        setErrorGeneral("No se pudo obtener el usuario después del registro.");
+        return;
+      }
 
-    // ======================================================
-    // 3) MOSTRAR MENSAJE DE ÉXITO (sin redirigir)
-    // ======================================================
-    setSuccessMessage(
-      "Tu cuenta fue creada. Te enviamos un correo de confirmación. Por favor revisa tu bandeja de entrada o correos no deseados y confirma tu cuenta antes de iniciar sesión."
-    );
+      // ======================================================
+      // 3) MOSTRAR MENSAJE DE ÉXITO (sin redirigir)
+      // ======================================================
+      setSuccessMessage(
+        "Tu cuenta fue creada. Te enviamos un correo de confirmación. Por favor revisa tu bandeja de entrada o correos no deseados y confirma tu cuenta antes de iniciar sesión."
+      );
 
-    // Opcional: limpiar campos del formulario
-    setName("");
-    setEmail("");
-    setPassword("");
-    setPassword2("");
-    setPhoneNumber("");
-    setTermsAccepted(false);
+      // Opcional: limpiar campos del formulario
+      setName("");
+      setEmail("");
+      setPassword("");
+      setPassword2("");
+      setPhoneNumber("");
+      setTermsAccepted(false);
 
-    setIsSubmitting(false);
+      // Nota: No reseteamos channel para mantener la elección si vuelve a registrarse.
+    });
   };
 
   return (
@@ -236,9 +254,7 @@ export default function RegisterPage() {
         </div>
 
         <div className="m-auto max-w-md p-9">
-          <h2 className="text-3xl font-semibold mb-3">
-            Registrate en Dinvox
-          </h2>
+          <h2 className="text-3xl font-semibold mb-3">Registrate en Dinvox</h2>
 
           <p className="text-white/80 text-lg">
             Comienza a registrar tus gastos con tu voz o texto simple.
@@ -252,14 +268,11 @@ export default function RegisterPage() {
       {/* ================================
           COLUMNA DERECHA: FORMULARIO
          ================================ */}
-      <section className="bg-slate-200 flex justify-center p-6 md:h-screen md:overflow-y-auto">
+      <section className="bg-slate-200 flex justify-center p-5 md:h-screen md:overflow-y-auto">
         <div className="w-full max-w-md">
+          <h1 className="text-2xl font-semibold text-slate-900">Crear cuenta</h1>
 
-          <h1 className="text-2xl font-semibold text-slate-900">
-            Crear cuenta
-          </h1>
-
-          <p className="text-sm text-slate-500 mb-6">
+          <p className="text-sm text-slate-500 mb-3">
             Completa tus datos para empezar.
           </p>
 
@@ -267,17 +280,16 @@ export default function RegisterPage() {
           {errorGeneral && (
             <p className="text-red-600 text-sm mb-3">{errorGeneral}</p>
           )}
+
           {/* Mensaje de éxito */}
           {successMessage && (
-            <p className="text-green-700 bg-green-100 border border-green-300 px-3 py-2 rounded-md text-sm mb-4">
+            <p className="text-green-700 bg-green-100 border border-green-300 px-3 py-1.5 rounded-md text-sm mb-4">
               {successMessage}
             </p>
           )}
 
-
           {/* Tarjeta */}
-          <div className="bg-white border border-slate-200 shadow-lg rounded-2xl p-6 space-y-4">
-
+          <div className="bg-white border border-slate-200 shadow-lg rounded-2xl p-6 space-y-3">
             {/* Nombre */}
             <div>
               <label className="block text-sm font-medium text-slate-700">
@@ -285,7 +297,7 @@ export default function RegisterPage() {
               </label>
 
               <input
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 outline-none focus:ring focus:ring-slate-200"
                 placeholder="Ej. Carlos Díaz"
                 value={name}
                 maxLength={80}
@@ -308,7 +320,7 @@ export default function RegisterPage() {
 
               <input
                 type="email"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 outline-none focus:ring focus:ring-slate-200"
                 placeholder="ejemplo@correo.com"
                 value={email}
                 maxLength={254}
@@ -330,13 +342,12 @@ export default function RegisterPage() {
               </label>
 
               <div className="mt-1 flex items-center gap-2">
-
                 {/* Dropdown país */}
                 <div className="relative">
                   <button
                     type="button"
                     onClick={() => setIsCountryOpen((p) => !p)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                    className="inline-flex items-center gap- rounded-lg border border-slate-300 bg-slate-100 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
                   >
                     <Image
                       src={currentCountry.flagSrc}
@@ -360,7 +371,7 @@ export default function RegisterPage() {
                             clearErrors();
                             setCurrentCountry(country);
                           }}
-                          className="flex w-full items-center justify-between px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                          className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
                         >
                           <span className="flex items-center gap-2">
                             <Image
@@ -384,7 +395,7 @@ export default function RegisterPage() {
                 {/* Input número */}
                 <input
                   type="tel"
-                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200 text-sm"
+                  className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 outline-none focus:ring focus:ring-slate-200 text-sm"
                   placeholder="300 000 0000"
                   value={phoneNumber}
                   maxLength={15}
@@ -400,6 +411,55 @@ export default function RegisterPage() {
               )}
             </div>
 
+            {/* 🆕 Canal (debajo del celular) */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700">
+                Canal de uso *
+              </label>
+
+              <div className="mt-1 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearErrors();
+                    setChannel("whatsapp");
+                  }}
+                  className={`
+                    rounded-lg border px-3 py-1.5 text-sm font-medium transition
+                    ${
+                      channel === "whatsapp"
+                        ? "border-slate-500 bg-slate-200 text-slate-900 ring-1 ring-slate-400"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }
+                  `}
+                >
+                  WhatsApp
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearErrors();
+                    setChannel("telegram");
+                  }}
+                  className={`
+                    rounded-lg border px-3 py-1.5 text-sm font-medium transition
+                    ${
+                      channel === "telegram"
+                        ? "border-slate-500 bg-slate-200 text-slate-900 ring-1 ring-slate-400"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }
+                  `}
+                >
+                  Telegram
+                </button>
+              </div>
+
+              <p className="mt-1 text-[11px] text-slate-500">
+                La conexión se realiza en tu primer login.
+              </p>
+            </div>
+
             {/* Password */}
             <div>
               <label className="block text-sm font-medium text-slate-700">
@@ -408,7 +468,7 @@ export default function RegisterPage() {
 
               <input
                 type="password"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 outline-none focus:ring focus:ring-slate-200"
                 placeholder="Mínimo 8 caracteres"
                 value={password}
                 maxLength={128}
@@ -431,7 +491,7 @@ export default function RegisterPage() {
 
               <input
                 type="password"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring focus:ring-slate-200"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 outline-none focus:ring focus:ring-slate-200"
                 placeholder="Repite la contraseña"
                 value={password2}
                 maxLength={128}
@@ -450,8 +510,7 @@ export default function RegisterPage() {
           </div>
 
           {/* Checkbox + Botón */}
-          <div className="mt-6 space-y-4">
-
+          <div className="mt-4 space-y-3">
             {/* Términos */}
             <label className="flex items-start space-x-3 text-sm text-slate-700">
               <input
@@ -469,13 +528,22 @@ export default function RegisterPage() {
 
               <span>
                 Acepto los{" "}
-                <a href="/legal#terminos" target="_blank" className="underline text-slate-800">
+                <a
+                  href="/legal#terminos"
+                  target="_blank"
+                  className="underline text-slate-800"
+                >
                   Términos y Condiciones
                 </a>{" "}
                 y la{" "}
-                <a href="/legal#privacidad" target="_blank" className="underline text-slate-800">
+                <a
+                  href="/legal#privacidad"
+                  target="_blank"
+                  className="underline text-slate-800"
+                >
                   Política de Privacidad
-                </a>.
+                </a>
+                .
               </span>
             </label>
 
@@ -488,7 +556,7 @@ export default function RegisterPage() {
               onClick={handleRegister}
               disabled={isSubmitting}
               className={`
-                w-full rounded-lg py-2.5 font-medium text-white
+                w-full rounded-lg py-2 font-medium text-white
                 bg-gradient-to-r from-brand-700 to-brand-500
                 hover:from-brand-600 hover:to-brand-400
                 transition
