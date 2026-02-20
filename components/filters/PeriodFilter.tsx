@@ -3,6 +3,12 @@
 // Filtro de período reutilizable (Hoy, semana, 7 días, mes, rango, etc.)
 // felitro para analisi reutilizable (este mes, mes anterior, ultimo s3 , ultimos 6, año corrido)
 // - Solo maneja UI y emite el valor seleccionado al padre
+//
+// 🆕 Cambio (compatible hacia atrás):
+// - Se agrega `allowedValues` (opcional) para restringir qué opciones se muestran.
+// - Si NO se pasa `allowedValues`, el componente se comporta igual que antes (sin cambios).
+// - Esto permite casos como /performance: usar 2 filtros separados (mensual vs histórico)
+//   mostrando solo las opciones válidas en cada sección, sin afectar Dashboard/Expenses.
 
 "use client";
 export type PeriodFilterMode = "operational" | "analysis";
@@ -26,6 +32,12 @@ interface PeriodFilterProps<T extends string = PeriodFilterValue> {
   value: T;
   onChange: (value: T) => void;
   mode?: PeriodFilterMode; // 👈 opcional
+
+  // 🆕 Permite restringir las opciones mostradas sin cambiar el comportamiento existente.
+  // Ejemplo:
+  //   allowedValues={["current_month","previous_month"]}
+  //   allowedValues={["last_6_months","last_12_months","year_to_date"]}
+  allowedValues?: readonly T[];
 }
 
 const PERIOD_OPTIONS = {
@@ -46,13 +58,20 @@ const PERIOD_OPTIONS = {
   ],
 } as const;
 
-
 export default function PeriodFilter<T extends string>({
-    value,
-    onChange,
-    mode = "operational",
-  }: PeriodFilterProps<T>) {
-  const options = PERIOD_OPTIONS[mode];
+  value,
+  onChange,
+  mode = "operational",
+  allowedValues,
+}: PeriodFilterProps<T>) {
+  const baseOptions = PERIOD_OPTIONS[mode];
+
+  // 🆕 Si `allowedValues` existe, filtramos. Si no, dejamos todo como antes.
+  // Nota: Si por error `allowedValues` queda vacío, hacemos fallback a baseOptions
+  // para no romper la UI (y porque en otros lugares no se usa este prop).
+  const options = allowedValues?.length
+    ? baseOptions.filter((opt) => (allowedValues as readonly string[]).includes(opt.value))
+    : baseOptions;
 
   return (
     <div className="flex-1">

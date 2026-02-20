@@ -4,10 +4,16 @@
 // - Permite UNA sección abierta a la vez.
 // - Define sección abierta por defecto.
 // - Centraliza el estado del accordion (open / close).
+//
+// 🆕 Fix importante:
+// - Antes SOLO renderizaba si `children` era un array.
+// - Cuando hay 1 sola sección, React pasa `children` como un solo elemento (NO array),
+//   y el accordion quedaba vacío.
+// - Ahora normalizamos con React.Children.toArray(children) para soportar 1 o N secciones.
 
 "use client";
 
-import { ReactNode, useState } from "react";
+import React, { ReactNode, useState } from "react";
 
 type AccordionProps = {
   defaultOpenKey: string;
@@ -17,44 +23,41 @@ type AccordionProps = {
 type SectionProps = {
   sectionKey: string;
   title: string;
-  icon?: ReactNode;      // 👈 FALTABA
+  icon?: ReactNode;
   children: ReactNode;
 };
 
-export function Accordion({
-  defaultOpenKey,
-  children,
-}: AccordionProps) {
+export function Accordion({ defaultOpenKey, children }: AccordionProps) {
   const [openKey, setOpenKey] = useState<string | null>(defaultOpenKey);
+
+  // ✅ Normaliza children a array siempre (1 o N)
+  const items = React.Children.toArray(children) as any[];
 
   return (
     <div className="flex flex-col gap-6">
-      {Array.isArray(children) &&
-        children.map((child: any) => {
-          if (!child) return null;
+      {items.map((child: any) => {
+        if (!child) return null;
 
-          const {
-            sectionKey,
-            title,
-            icon,
-            children: sectionChildren,
-          } = child.props as SectionProps;
+        const { sectionKey, title, icon, children: sectionChildren } =
+          (child.props as SectionProps) ?? {};
 
-          const isOpen = openKey === sectionKey;
+        // Guardas mínimas para evitar crasheos si llega algo raro
+        if (!sectionKey) return null;
 
-          return (
-            <div key={sectionKey}>
-              {child.type({
-                title,
-                icon, // 👈 ahora sí llega
-                isOpen,
-                onToggle: () =>
-                  setOpenKey(isOpen ? null : sectionKey),
-                children: sectionChildren,
-              })}
-            </div>
-          );
-        })}
+        const isOpen = openKey === sectionKey;
+
+        return (
+          <div key={sectionKey}>
+            {child.type({
+              title,
+              icon,
+              isOpen,
+              onToggle: () => setOpenKey(isOpen ? null : sectionKey),
+              children: sectionChildren,
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }
