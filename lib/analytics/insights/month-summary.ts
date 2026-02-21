@@ -1,4 +1,4 @@
-// src/lib/dinvox/insights/month-summary.ts
+// src/lib/analytics/insights/month-summary.ts
 // -----------------------------------------------------------------------------
 // Motor v1: Insight del mes (Summary-only)
 //
@@ -37,6 +37,7 @@
 // expenses-utils (ej: formatMoneySymbol) y reemplazar esta función local.
 // -----------------------------------------------------------------------------
 
+
 import { CATEGORIES } from "@/lib/dinvox/categories";
 import { monthShortEs, pad2 } from "@/lib/analytics/dates";
 
@@ -66,16 +67,10 @@ function confidenceFromCount(count: number): "low" | "medium" | "high" {
 }
 
 function pctShort(p: number) {
-  // 1 decimal y sin ".0"
   const v = Math.round(p * 10) / 10;
   return Number.isInteger(v) ? `${v.toFixed(0)}%` : `${v.toFixed(1)}%`;
 }
 
-/**
- * Formato de dinero "símbolo solamente".
- * - Ej: "$ 120.000" en es-CO para COP, "€120.00" para EUR.
- * - Usamos narrowSymbol para evitar "COP" / "USD".
- */
 function formatMoneySymbolOnly(
   value: number,
   currency: string,
@@ -99,17 +94,11 @@ function formatMoneySymbolOnly(
   }
 }
 
-/**
- * Convierte "YYYY-MM-DD" a "DD Mon" estilo corto.
- * - Usamos monthShortEs() para mantener consistencia con tu UI de analytics.
- * - Ej: "2026-02-13" -> "13 Feb"
- */
 function formatAsOfHumanEs(yyyyMmDd: string): string {
   const y = Number(yyyyMmDd.slice(0, 4));
   const m = Number(yyyyMmDd.slice(5, 7));
   const d = Number(yyyyMmDd.slice(8, 10));
 
-  // Date en UTC para evitar shifts raros del server
   const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
   const mon = monthShortEs(dt);
 
@@ -124,14 +113,15 @@ export default function buildMonthSummaryInsight({
   const count = summary.meta.count ?? 0;
 
   // ---------------------------------------------------------------------------
-  // Caso 0: sin gastos este mes (mensaje neutro, aplica con o sin historial)
+  // Caso 0: sin gastos este mes
   // ---------------------------------------------------------------------------
   if (count === 0) {
     return {
       kind: "no_data" as const,
       confidence: "low" as const,
+      // ✅ Copy más claro y “bot-friendly”
       message:
-        "Este mes aún no tienes gastos registrados. Registra al menos 1 para ver tu resumen.",
+        "📊 *Resumen del mes*\nEste mes aún no tienes gastos registrados.\nRegistra al menos 1 para ver tu resumen.",
     };
   }
 
@@ -144,15 +134,17 @@ export default function buildMonthSummaryInsight({
   const cats = summary.categories ?? [];
   const activeCategories = cats.length;
 
-  // Qué mostrar (según tus reglas)
-  // - 1 categoría: muestra 1
-  // - 2-3: muestra todas
-  // - >=4: top 3
-  const shown =
-    activeCategories <= 3 ? cats : cats.slice(0, 3);
+  const shown = activeCategories <= 3 ? cats : cats.slice(0, 3);
 
   const lines: string[] = [];
-  lines.push(`A hoy ${asOf}: ${totalMoney}`);
+
+  // ✅ Header + total claro
+  lines.push(`📊 *Resumen del mes a hoy ${asOf}*`);
+  lines.push(`*Total gastado:* ${totalMoney}`);
+  lines.push(""); // ✅ línea en blanco para respirar
+
+  // ✅ Sección top
+  lines.push("*Top categorías*");
 
   shown.forEach((c, idx) => {
     const cfg = (CATEGORIES as any)[c.categoryId];
@@ -160,13 +152,15 @@ export default function buildMonthSummaryInsight({
     const label = cfg?.label ?? c.categoryId;
     const amt = formatMoneySymbolOnly(c.amount, currency, language);
 
-    const prefix = idx === 0 ? "Top" : `${idx + 1})`;
-    lines.push(`${prefix}: ${emoji}${label} ${amt} (${pctShort(c.percent)})`);
+    // ✅ Arreglo del "2):" y mejora de formato
+    const n = idx + 1;
+    lines.push(`${n}) ${emoji}${label} — ${amt} (${pctShort(c.percent)})`);
   });
 
   // Top3% solo si hay >=5 categorías activas
   if (activeCategories >= 5) {
     const top3 = cats.slice(0, 3).reduce((acc, c) => acc + (c.percent || 0), 0);
+    lines.push("");
     lines.push(`Top 3: ${pctShort(top3)}`);
   }
 
