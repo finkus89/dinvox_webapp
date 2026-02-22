@@ -5,7 +5,13 @@
 // Recibe:
 //   - from: YYYY-MM-DD  (inicio del rango)
 //   - to:   YYYY-MM-DD  (fin del rango)
-//   - category (opcional): id de categoría ("comida", "ropa", etc.)
+//   - category (opcional): id de categoría ("comida", "ropa", etc.)            ✅ legacy (single)
+//   - categories (opcional): CSV de categorías ("ocio,comida,servicios")      🆕 multi (solo tabla)
+//
+// Prioridad de filtros:
+//   1) categories (multi)  -> IN (...)
+//   2) category (single)   -> EQ (...)
+//   3) nada / "all"        -> sin filtro
 //
 // Usa `expense_date` (fecha local normalizada) para filtrar,
 // NO created_at (que es UTC y ya no debe usarse para UI).
@@ -40,7 +46,18 @@ export async function GET(request: Request) {
 
     const from = searchParams.get("from");
     const to = searchParams.get("to");
+
+    // ✅ Filtro legacy (single)
     const category = searchParams.get("category"); // opcional
+
+    // 🆕 Filtro multi (CSV)
+    // Ej: "ocio,comida" -> ["ocio","comida"]
+    const categoriesParam = searchParams.get("categories"); // opcional
+    const categories =
+      categoriesParam
+        ?.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean) ?? [];
 
     if (!from || !to) {
       return NextResponse.json(
@@ -98,9 +115,19 @@ export async function GET(request: Request) {
       .order("expense_date", { ascending: false });
 
     // -----------------------------------------
-    // 5) Filtro opcional por categoría
+    // 5) Filtro opcional por categoría(s)
     // -----------------------------------------
-    if (category && category !== "all") {
+    // Prioridad:
+    // - Si viene "categories" (multi) y tiene valores => IN(...)
+    // - Si no, usamos "category" (single) si es distinto de "all"
+    //
+    // Nota:
+    // - Esto NO rompe el comportamiento actual, porque:
+    //   - si nadie envía "categories", todo funciona igual
+    // - Solo la tabla (multi filter) empezará a enviar "categories"
+    if (categories.length > 0) {
+      query = query.in("category", categories);
+    } else if (category && category !== "all") {
       query = query.eq("category", category);
     }
 

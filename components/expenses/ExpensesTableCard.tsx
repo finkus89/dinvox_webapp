@@ -6,7 +6,8 @@
 // - Llamar al endpoint real `/api/expenses` con:
 //      • from (YYYY-MM-DD)
 //      • to   (YYYY-MM-DD)
-//      • category (opcional): id de categoría ("comida", "ropa", etc.)
+//      • category (opcional): id de categoría ("comida", "ropa", etc.)           ✅ legacy (single)
+//      • categories (opcional): CSV de categorías ("ocio,comida")               🆕 multi (solo tabla)
 // - Reutilizar filtros de período y rango:
 //      • PeriodFilter (today/week/7d/month/prev_month/range)
 //      • DateRangePicker cuando el usuario selecciona "range"
@@ -28,6 +29,12 @@
 //    • Ver datos SIEMPRE (tabla + gráficos).
 //    • Mutar (crear/editar/borrar) SOLO si can_use=true.
 // - Por eso derivamos canMutate = canUse desde AppContext.
+//
+// 🆕 NOTA MULTI-CATEGORÍAS (solo tabla):
+// - Reemplazamos CategoryFilter (single) por MultiCategoryFilter (multi).
+// - Convención: [] = "todas" (no se envía filtro).
+// - Si hay 1 o más seleccionadas: enviamos `categories=...` (CSV).
+// - Esto NO afecta otras pantallas: solo esta tabla manda `categories`.
 // -----------------------------------------------------------------------------
 
 "use client";
@@ -35,7 +42,13 @@
 import { useEffect, useMemo, useState } from "react";
 import PeriodFilter, { PeriodFilterValue } from "@/components/filters/PeriodFilter";
 import DateRangePicker from "@/components/filters/DateRangePicker";
-import CategoryFilter from "@/components/filters/CategoryFilter";
+
+// ✅ Antes (single)
+// import CategoryFilter from "@/components/filters/CategoryFilter";
+
+// 🆕 Ahora (multi, solo tabla)
+import MultiCategoryFilter from "@/components/filters/MultiCategoryFilter";
+
 import {
   PeriodState,
   getPeriodDates,
@@ -63,7 +76,11 @@ import { useAppContext } from "@/lib/dinvox/app-context";
 interface ExpensesTableCardProps {
   initialFrom?: string; // YYYY-MM-DD (opcional)
   initialTo?: string; // YYYY-MM-DD (opcional)
+
+  // ✅ Legacy (single): lo dejamos para no romper deep-links viejos.
+  // Si llega "all" -> sin filtro. Si llega categoryId -> se convierte a [categoryId].
   initialCategory?: string; // "all" o un CategoryId (opcional)
+
   initialPeriodType?: PeriodFilterValue;
 
   // (Legacy / transición) — si alguna pantalla antigua todavía los pasa.
@@ -100,11 +117,14 @@ export default function ExpensesTableCard({
 
   const isRange = period.type === "range";
 
-  // Filtro de categoría: "all" o un CategoryId ("comida", "transporte", etc.)
-  // Si viene initialCategory desde la URL, la respetamos; si no, usamos "all".
-  const [categoryFilter, setCategoryFilter] = useState<string>(
-    initialCategory && initialCategory !== "all" ? initialCategory : "all"
-  );
+  // 🆕 Filtro multi: array vacío => "todas"
+  // - Si viene initialCategory (legacy) lo convertimos:
+  //   • "all" / null -> []
+  //   • "comida" -> ["comida"]
+  const [categoryIds, setCategoryIds] = useState<CategoryId[]>(() => {
+    if (!initialCategory || initialCategory === "all") return [];
+    return [initialCategory as CategoryId];
+  });
 
   // =============================
   // ESTADO: datos de la API
@@ -159,8 +179,11 @@ export default function ExpensesTableCard({
           to: period.to,
         });
 
-        if (categoryFilter && categoryFilter !== "all") {
-          params.set("category", categoryFilter);
+        // 🆕 Multi-categorías:
+        // - [] => no enviar filtro (equivale a "todas")
+        // - 1+ => enviar CSV en `categories`
+        if (categoryIds.length > 0) {
+          params.set("categories", categoryIds.join(","));
         }
 
         const res = await fetch(`/api/expenses?${params.toString()}`, {
@@ -194,7 +217,7 @@ export default function ExpensesTableCard({
     return () => {
       controller.abort();
     };
-  }, [period.from, period.to, categoryFilter, reloadKey]);
+  }, [period.from, period.to, categoryIds, reloadKey]);
 
   // =============================
   // DERIVADOS: datos
@@ -305,7 +328,7 @@ export default function ExpensesTableCard({
         {/* ------------------------------------------------------------
             Columna 2 — FILTROS (Período + Categoría)
           ------------------------------------------------------------ */}
-        <div className="col-span-2 md:col-span-1 flex flex-col gap-3 md:max-w-sm">
+        <div className="col-span-3 md:col-span-1 flex flex-col gap-3 md:max-w-sm min-w-0">
           <PeriodFilter
             value={period.type}
             onChange={(newType) => {
@@ -318,59 +341,60 @@ export default function ExpensesTableCard({
             }}
           />
 
-          <CategoryFilter value={categoryFilter} onChange={(value) => setCategoryFilter(value)} />
+          {/* 🆕 MultiCategoryFilter (solo tabla) */}
+          <div className="min-w-0">
+            <MultiCategoryFilter value={categoryIds} onChange={setCategoryIds} />
+          </div>
         </div>
 
         {/* ------------------------------------------------------------
             Columna 3 — BOTONES (Nuevo gasto + export CSV)
           ------------------------------------------------------------ */}
-        <div className="mt-5 md:mt-5 col-span-1 flex flex-col items-start md:items-center md:justify-center w-auto gap-7">
-          <button
-            onClick={() => {
-              // ✅ Modo lectura: no abrir modal de creación
-              if (!canMutate) return;
-              setIsNewExpenseOpen(true);
-            }}
-            disabled={!canMutate}
-            className={`
-              w-full md:w-[150px]
-              bg-emerald-500/20
-              ${canMutate ? "hover:bg-emerald-500/30" : "opacity-50 cursor-not-allowed"}
-              text-emerald-100
-              font-semibold
-              px-3 py-1.5
-              md:px-4 md:py-1.5
-              rounded-xl
-              border border-emerald-400/20
-              backdrop-blur
-              transition
-              flex items-center gap-2
-              text-sm
-            `}
-            title={!canMutate ? "Modo lectura: no puedes crear gastos" : "Crear nuevo gasto"}
-          >
-            <span className="text-xl font-bold">+</span> Nuevo gasto
-          </button>
-
-          <button
-            onClick={handleExportClick}
+        <div className="col-span-3 md:col-span-1">
+          <div
             className="
-              w-full md:w-[150px]
-              bg-emerald-500/10
-              hover:bg-emerald-500/20
-              text-emerald-100
-              font-medium
-              px-3 py-1.5
-              md:px-4 md:py-1.5
-              rounded-xl
-              border border-emerald-400/30
-              backdrop-blur
-              transition
-              text-xs sm:text-sm
+              grid grid-cols-2 gap-3
+              md:flex md:flex-col md:items-end md:justify-start md:gap-3 md:pt-6
             "
           >
-            Exportar CSV
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!canMutate) return;
+                setIsNewExpenseOpen(true);
+              }}
+              disabled={!canMutate}
+              className="
+                w-full md:w-[170px]
+                bg-emerald-500/20 hover:bg-emerald-500/30
+                text-emerald-100 font-semibold
+                px-3 py-2
+                rounded-xl border border-emerald-400/20
+                backdrop-blur transition flex items-center justify-center gap-2
+                text-sm
+                disabled:opacity-60 disabled:cursor-not-allowed
+              "
+            >
+              <span className="text-xl font-bold">+</span> Nuevo gasto
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportClick}
+              disabled={!hasData}
+              className="
+                w-full md:w-[170px]
+                bg-emerald-500/10 hover:bg-emerald-500/20
+                text-emerald-100 font-medium
+                px-3 py-2
+                rounded-xl border border-emerald-400/30
+                backdrop-blur transition text-sm
+                disabled:opacity-60 disabled:cursor-not-allowed
+              "
+            >
+              Exportar CSV
+            </button>
+          </div>
         </div>
       </div>
 
