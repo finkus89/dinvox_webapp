@@ -5,6 +5,7 @@
 // Recibe:
 //   - from: YYYY-MM-DD  (inicio del rango)
 //   - to:   YYYY-MM-DD  (fin del rango)
+//   - transaction_type (opcional): "expense" | "income"      🆕 (preparación ingresos)
 //   - category (opcional): id de categoría ("comida", "ropa", etc.)            ✅ legacy (single)
 //   - categories (opcional): CSV de categorías ("ocio,comida,servicios")      🆕 multi (solo tabla)
 //
@@ -31,6 +32,11 @@
 //
 // Este endpoint es equivalente al de summary, pero devuelve
 // registros individuales, no agregados.
+//
+// 🆕 Nota (transaction_type):
+// - Por ahora la UI solo usa "expense".
+// - Dejamos el parámetro listo para el tab futuro (Ingresos),
+//   sin romper el comportamiento actual.
 // ---------------------------------------------------------
 
 import { NextResponse } from "next/server";
@@ -46,6 +52,14 @@ export async function GET(request: Request) {
 
     const from = searchParams.get("from");
     const to = searchParams.get("to");
+
+    // 🆕 transaction_type (preparación ingresos)
+    // Default: "expense" para mantener comportamiento actual.
+    const transactionTypeParam = (searchParams.get("transaction_type") ?? "").trim();
+    const transaction_type =
+      transactionTypeParam === "income" || transactionTypeParam === "expense"
+        ? transactionTypeParam
+        : "expense";
 
     // ✅ Filtro legacy (single)
     const category = searchParams.get("category"); // opcional
@@ -104,12 +118,13 @@ export async function GET(request: Request) {
 
     // -----------------------------------------
     // 4) Construir query base
-    //     (filtrado por user_id + expense_date local)
+    //     (filtrado por user_id + transaction_type + expense_date local)
     // -----------------------------------------
     let query = supabase
       .from("expenses")
       .select("id, expense_date, category, amount, note")
       .eq("user_id", appUserId)
+      .eq("transaction_type", transaction_type) // 🆕 evita mezclar gastos/ingresos
       .gte("expense_date", from)
       .lte("expense_date", to)
       .order("expense_date", { ascending: false });
@@ -188,6 +203,11 @@ export async function GET(request: Request) {
 // - En webapp permitimos ver datos aunque can_use=false,
 //   pero NO permitimos mutar (crear/editar/borrar).
 // - Por eso aquí validamos can_use via guardCanMutate() antes de insertar.
+//
+// 🆕 Nota (transaction_type):
+// - Por ahora en webapp solo creamos "expense".
+// - Cuando agreguemos ingresos, este POST podrá aceptar "income" o
+//   se creará otro endpoint/modal específico.
 // -----------------------------------------------------------------------------
 export async function POST(request: Request) {
   try {
@@ -266,6 +286,7 @@ export async function POST(request: Request) {
       .insert({
         user_id: appUserId,
         auth_user_id: user.id,
+        transaction_type: "expense", // 🆕 hoy forzado a "expense"
         amount: amountNumber,
         category: categoryId,
         note: note ?? null,

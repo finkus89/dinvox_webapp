@@ -1,6 +1,6 @@
 // src/app/api/insights/month/route.ts
 // -----------------------------------------------------------------------------
-// Dinvox - Insights (v1): /api/insights/month
+// Dinvox - Insights (v2): /api/insights/month
 //
 // OBJETIVO
 // - Endpoint server-to-server (para n8n / botón rápido en canal).
@@ -10,6 +10,7 @@
 // - Method: GET
 // - Header: x-dinvox-key: <DINVOX_SERVER_KEY>
 // - Query:  auth_user_id=<uuid>
+//          transaction_type=<expense|income>     🆕 opcional (preparación ingresos)
 //
 // CONTRATO (response)
 // {
@@ -18,11 +19,11 @@
 //   message: string
 // }
 //
-// NOTAS DE DISEÑO
-// - NO usa sesión web (Supabase Auth cookies).
-// - Usa service role para leer perfil + gastos por auth_user_id.
+// CAMBIO v2 (RPC)
+// - Ya NO consulta directamente la tabla `expenses`.
+// - Usa RPC `get_range_summary()` como fuente de verdad.
+// - El cálculo de percent se hace aquí (igual que en /api/summary).
 // - Rango fijo: este mes a hoy (DATE local "expense_date") en TZ del usuario.
-// - Por ahora SOLO summary (dona/barras). Ritmo/Evolución quedan para v2.
 // -----------------------------------------------------------------------------
 
 import { NextResponse } from "next/server";
@@ -46,16 +47,7 @@ function getHeader(req: Request, name: string) {
   return req.headers.get(name) || req.headers.get(name.toLowerCase()) || "";
 }
 
-/**
- * Devuelve { y, m, d } como números usando la TZ del usuario.
- * - Importante: NO usamos Date.getFullYear()/getMonth() porque eso usa TZ del server.
- * - Usamos Intl.DateTimeFormat con timeZone para obtener la fecha "lógica" local.
- */
-function getYMDPartsInTimeZone(date: Date, timeZone: string): {
-  y: number;
-  m: number;
-  d: number;
-} {
+function getYMDPartsInTimeZone(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -94,6 +86,12 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const auth_user_id = searchParams.get("auth_user_id");
 
+    const transactionTypeParam = (searchParams.get("transaction_type") ?? "").trim();
+    const transaction_type =
+      transactionTypeParam === "income" || transactionTypeParam === "expense"
+        ? transactionTypeParam
+        : "expense";
+
     if (!auth_user_id) {
       return NextResponse.json(
         { error: "Missing query param: auth_user_id" },
@@ -109,11 +107,11 @@ export async function GET(request: Request) {
     });
 
     // -------------------------------------------------------------------------
-    // 3) Leer perfil (tabla users) por auth_user_id
+    // 3) Leer perfil (tabla users)
     // -------------------------------------------------------------------------
     const { data: profile, error: profileError } = await supabase
       .from("users")
-      .select("id, currency, language, timezone")
+      .select("currency, language, timezone")
       .eq("auth_user_id", auth_user_id)
       .single();
 
@@ -127,10 +125,9 @@ export async function GET(request: Request) {
       );
     }
 
-    const appUserId = profile.id as string;
-    const currency = (profile.currency ?? "COP") as string;
-    const language = (profile.language ?? "es-CO") as string;
-    const timezone = (profile.timezone ?? "America/Bogota") as string;
+    const currency = profile.currency ?? "COP";
+    const language = profile.language ?? "es-CO";
+    const timezone = profile.timezone ?? "America/Bogota";
 
     // -------------------------------------------------------------------------
     // 4) Rango fijo: este mes a hoy (en TZ del user)
@@ -140,58 +137,62 @@ export async function GET(request: Request) {
     const from = `${todayParts.y}-${pad2(todayParts.m)}-01`;
 
     // -------------------------------------------------------------------------
-    // 5) Consultar gastos por expense_date (DATE local)
+    // 5) RPC: get_range_summary (fuente de verdad)
     // -------------------------------------------------------------------------
-    const { data: expenses, error: expensesError } = await supabase
-      .from("expenses")
-      .select("amount, category, expense_date")
-      .eq("user_id", appUserId)
-      .gte("expense_date", from)
-      .lte("expense_date", to);
+    const { data: rpcRows, error: rpcError } = await supabase.rpc(
+      "get_range_summary",
+      {
+        p_auth_user_id: auth_user_id,
+        p_from: from,
+        p_to: to,
+        p_transaction_type: transaction_type,
+      }
+    );
 
-    if (expensesError) {
+    if (rpcError) {
       return NextResponse.json(
-        { error: "Error al consultar gastos", details: expensesError.message },
+        { error: "Error en RPC get_range_summary", details: rpcError.message },
         { status: 500 }
       );
     }
 
-    const safeExpenses = expenses ?? [];
+    const rpc = Array.isArray(rpcRows) ? rpcRows[0] : null;
 
-    // -------------------------------------------------------------------------
-    // 6) Agrupar por categoría y construir summary (igual a /api/summary)
-    // -------------------------------------------------------------------------
-    const totals = new Map<string, number>();
-    let total = 0;
+    const total = Number(rpc?.total_amount) || 0;
+    const count = Number(rpc?.count) || 0;
 
-    for (const exp of safeExpenses as any[]) {
-      const categoryId = exp?.category ?? "otros";
-      const amount = Number(exp?.amount) || 0;
-      totals.set(categoryId, (totals.get(categoryId) ?? 0) + amount);
-      total += amount;
-    }
+    const rawByCategory = (rpc?.by_category ?? []) as Array<{
+      category_id?: string;
+      amount?: number | string;
+    }>;
 
-    const categories = Array.from(totals.entries())
-      .map(([categoryId, amount]) => ({
-        categoryId,
-        amount,
-        percent: total > 0 ? Number(((amount * 100) / total).toFixed(2)) : 0,
-      }))
+    const categories = (Array.isArray(rawByCategory) ? rawByCategory : [])
+      .map((x) => {
+        const categoryId = String(x?.category_id ?? "otros");
+        const amount = Number(x?.amount) || 0;
+
+        return {
+          categoryId,
+          amount,
+          percent: total > 0 ? Number(((amount * 100) / total).toFixed(2)) : 0,
+        };
+      })
       .sort((a, b) => b.amount - a.amount);
 
     const monthSummary = {
       total,
       categories,
       meta: {
-        count: safeExpenses.length,
+        count,
         from,
         to,
         timezone,
+        transaction_type,
       },
     };
 
     // -------------------------------------------------------------------------
-    // 7) Motor v1 (solo Summary -> texto listo)
+    // 6) Motor de insight (v1 - summary)
     // -------------------------------------------------------------------------
     const result = buildMonthSummaryInsight({
       summary: monthSummary,
