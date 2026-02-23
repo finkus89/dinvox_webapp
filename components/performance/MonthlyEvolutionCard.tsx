@@ -15,12 +15,21 @@
 // 4) Calcula series e insights con `computeMonthlyEvolution()`.
 // 5) Renderiza filtro de categoría + headline + gráfico.
 //
+// 🆕 Optimización (API view):
+// - Esta card NO necesita id ni note.
+// - Ahora pide `view=analytics` para reducir payload.
+// - Además envía `transaction_type=expense` explícito para evitar drift cuando se
+//   activen ingresos.
+// - Respuesta esperada (view=analytics):
+//    [{ date, categoryId, amount, currency }, ...]
+//
 // Moneda / idioma:
 // - Fuente de verdad: AppContext (layout).
 // - Respaldo: API (primer gasto) -> fallbacks -> default.
 //
 // Fetch:
 // - Usa AbortController para evitar race conditions (cambio de período/unmount).
+// - Usa helper central `fetchExpenses()` (refactor /api/expenses).
 // -----------------------------------------------------------------------------
 
 "use client";
@@ -47,6 +56,10 @@ import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
 // ✅ contexto global (layout)
 import { useAppContext } from "@/lib/dinvox/app-context";
 
+// ✅ Helpers centralizados para /api/expenses (refactor)
+import { fetchExpenses } from "@/lib/dinvox/expenses-api";
+import type { ApiExpenseAnalytics } from "@/lib/dinvox/expenses-api-types";
+
 // -----------------------
 // Props
 // -----------------------
@@ -58,18 +71,6 @@ type MonthlyEvolutionCardProps = {
   fallbackCurrency?: string;
   fallbackLanguage?: string;
   embedded?: boolean;
-};
-
-// -----------------------
-// Tipos: respuesta real de /api/expenses
-// -----------------------
-type ApiExpense = {
-  id: string;
-  date: string; // "YYYY-MM-DD"
-  categoryId: string;
-  amount: number;
-  currency: string;
-  note: string;
 };
 
 // -----------------------
@@ -94,7 +95,9 @@ export default function MonthlyEvolutionCard({
   const { currency: ctxCurrency, language: ctxLanguage } = useAppContext();
 
   // Datos crudos (para moneda real si existe)
-  const [apiExpenses, setApiExpenses] = useState<ApiExpense[]>([]);
+  // 🆕 Con view=analytics ya no viene id/note, pero sí viene currency.
+  const [apiExpenses, setApiExpenses] = useState<ApiExpenseAnalytics[]>([]);
+
   // Input mínimo para analytics
   const [expenses, setExpenses] = useState<ExpenseForEvolution[]>([]);
 
@@ -146,7 +149,11 @@ export default function MonthlyEvolutionCard({
   // -----------------------
   // Fetch (1 sola llamada)
   // -----------------------
-  useEffect(() => {
+  // 🆕 Refactor /api/expenses:
+  // - view=analytics (payload mínimo)
+  // - transaction_type=expense explícito
+    useEffect(() => {
+    // ✅ aquí garantizamos strings
     if (!from || !to) return;
 
     const controller = new AbortController();
@@ -156,25 +163,20 @@ export default function MonthlyEvolutionCard({
       setError(null);
 
       try {
-        const res = await fetch(`/api/expenses?from=${from}&to=${to}`, {
-          method: "GET",
-          signal: controller.signal,
-        });
+        const data = await fetchExpenses<ApiExpenseAnalytics>(
+          {
+            from: String(from), // ✅ ya es string, pero así TS queda feliz
+            to: String(to),
+            view: "analytics",
+            transaction_type: "expense",
+          },
+          { signal: controller.signal }
+        );
 
-        if (!res.ok) {
-          const payload = await res.json().catch(() => null);
-          const msg =
-            payload?.error ??
-            `Error al cargar gastos (${res.status} ${res.statusText}).`;
-          throw new Error(msg);
-        }
-
-        const data = (await res.json()) as ApiExpense[];
         const safe = Array.isArray(data) ? data : [];
 
         setApiExpenses(safe);
 
-        // Normalizamos al formato mínimo para analytics
         setExpenses(
           safe.map((e) => ({
             date: e.date,
@@ -186,7 +188,7 @@ export default function MonthlyEvolutionCard({
         if (e?.name === "AbortError") return;
         setError(e?.message ?? "Error desconocido");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
 

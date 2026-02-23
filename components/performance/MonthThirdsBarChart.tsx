@@ -154,9 +154,6 @@ export default function MonthThirdsBarChart({
           })}
         </div>
 
-        <p className="mt-3 text-[11px] text-white/55">
-          % calculado sobre el total registrado del mes.
-        </p>
       </div>
     </div>
   );

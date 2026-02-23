@@ -16,6 +16,16 @@
 //    • Insight textual (headline + nota)
 //    • Gráfico de barras por tercios
 //
+// 🆕 Optimización (API view):
+// - Esta card NO necesita id ni note.
+// - Ahora pide `view=analytics` para reducir payload.
+// - Respuesta esperada (view=analytics):
+//    [{ date, categoryId, amount, currency }, ...]
+//
+// Dónde se usa este patrón después:
+// - MonthRhythmCard (ritmo): `view=analytics` (mes + 3 previos)
+// - MonthlyEvolution (evolution): `view=analytics` (rangos largos)
+//
 // Moneda / idioma:
 // - Fuente de verdad: AppContext (layout)
 // - Props fallbackCurrency/fallbackLanguage quedan como respaldo por transición.
@@ -60,14 +70,12 @@ type MonthThirdsCardProps = {
   embedded?: boolean;
 };
 
-// Respuesta que devuelve tu API /api/expenses
-type ApiExpense = {
-  id: string;
+// ✅ Respuesta esperada con view=analytics
+type ApiExpenseAnalytics = {
   date: string; // "YYYY-MM-DD"
   categoryId: string;
   amount: number;
   currency: string;
-  note: string;
 };
 
 // Estado simple del tercio según el día del mes actual
@@ -97,7 +105,7 @@ export default function MonthThirdsCard({
   const [error, setError] = useState<string | null>(null);
 
   // Datos crudos desde API
-  const [expenses, setExpenses] = useState<ApiExpense[]>([]);
+  const [expenses, setExpenses] = useState<ApiExpenseAnalytics[]>([]);
 
   // Anchor del mes: día 1 evita bugs por 29/30/31
   const anchorDate = useMemo(() => {
@@ -130,7 +138,7 @@ export default function MonthThirdsCard({
   }, [isClosedMonth]);
 
   // -----------------------
-  // Fetch real a tu API
+  // Fetch real a tu API (optimizado con view=analytics)
   // -----------------------
   useEffect(() => {
     const controller = new AbortController();
@@ -140,10 +148,13 @@ export default function MonthThirdsCard({
       setError(null);
 
       try {
-        const res = await fetch(`/api/expenses?from=${from}&to=${to}`, {
-          method: "GET",
-          signal: controller.signal,
-        });
+        const res = await fetch(
+          `/api/expenses?from=${from}&to=${to}&view=analytics&transaction_type=expense`,
+          {
+            method: "GET",
+            signal: controller.signal,
+          }
+        );
 
         if (!res.ok) {
           const payload = await res.json().catch(() => null);
@@ -153,14 +164,13 @@ export default function MonthThirdsCard({
           throw new Error(msg);
         }
 
-        const data = (await res.json()) as ApiExpense[];
+        const data = (await res.json()) as ApiExpenseAnalytics[];
 
         setExpenses(Array.isArray(data) ? data : []);
       } catch (e: any) {
         if (e?.name === "AbortError") return; // request cancelada (cambio de periodo / unmount)
         setError(e?.message ?? "Error desconocido al cargar gastos.");
       } finally {
-        // Si fue abort, no hace falta “corregir” estado; pero este set no rompe.
         setLoading(false);
       }
     }

@@ -18,12 +18,21 @@
 //    • Fallback sin baseline: promedio diario actual
 //    • Gráfico acumulado actual vs baseline (si existe)
 //
+// 🆕 Optimización (API view):
+// - Esta card NO necesita id ni note.
+// - Ahora pide `view=analytics` para reducir payload.
+// - Además envía `transaction_type=expense` explícito para evitar drift cuando se
+//   activen ingresos.
+// - Respuesta esperada (view=analytics):
+//    [{ date, categoryId, amount, currency }, ...]
+//
 // Moneda / idioma:
 // - Fuente de verdad: AppContext (layout).
 // - Respaldo: API (primer gasto) -> fallbacks -> default.
 //
 // Fetch:
 // - Usa AbortController para evitar race conditions al cambiar periodo/montaje.
+// - Usa helper central `fetchExpenses()` (refactor /api/expenses).
 // -----------------------------------------------------------------------------
 
 "use client";
@@ -51,6 +60,10 @@ import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
 // ✅ contexto global (layout)
 import { useAppContext } from "@/lib/dinvox/app-context";
 
+// ✅ Helpers centralizados para /api/expenses (refactor)
+import { fetchExpenses } from "@/lib/dinvox/expenses-api";
+import type { ApiExpenseAnalytics } from "@/lib/dinvox/expenses-api-types";
+
 // -----------------------
 // Tipos (alineado con /api/expenses)
 // -----------------------
@@ -60,15 +73,6 @@ type MonthRhythmCardProps = {
   fallbackCurrency?: string; // ej "COP"
   fallbackLanguage?: string; // ej "es-CO" | "es-ES" | "en-US" | "en-CA"
   embedded?: boolean;
-};
-
-type ApiExpense = {
-  id: string;
-  date: string; // "YYYY-MM-DD"
-  categoryId: string;
-  amount: number;
-  currency: string;
-  note: string;
 };
 
 // -----------------------
@@ -105,8 +109,8 @@ export default function MonthRhythmCard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Datos crudos desde API
-  const [expenses, setExpenses] = useState<ApiExpense[]>([]);
+  // Datos crudos desde API (view=analytics)
+  const [expenses, setExpenses] = useState<ApiExpenseAnalytics[]>([]);
 
   // Anchor date:
   // - previous_month: mes anterior (día 1)
@@ -164,6 +168,9 @@ export default function MonthRhythmCard({
   // -----------------------
   // Fetch (1 llamada) a /api/expenses con rango amplio
   // -----------------------
+  // 🆕 Refactor /api/expenses:
+  // - view=analytics (payload mínimo)
+  // - transaction_type=expense explícito
   useEffect(() => {
     const controller = new AbortController();
 
@@ -172,26 +179,22 @@ export default function MonthRhythmCard({
       setError(null);
 
       try {
-        const res = await fetch(`/api/expenses?from=${wideFrom}&to=${wideTo}`, {
-          method: "GET",
-          signal: controller.signal,
-        });
+        const data = await fetchExpenses<ApiExpenseAnalytics>(
+          {
+            from: wideFrom,
+            to: wideTo,
+            view: "analytics",
+            transaction_type: "expense",
+          },
+          { signal: controller.signal }
+        );
 
-        if (!res.ok) {
-          const payload = await res.json().catch(() => null);
-          const msg =
-            payload?.error ??
-            `Error al cargar gastos (${res.status} ${res.statusText}).`;
-          throw new Error(msg);
-        }
-
-        const data = (await res.json()) as ApiExpense[];
         setExpenses(Array.isArray(data) ? data : []);
       } catch (e: any) {
         if (e?.name === "AbortError") return;
         setError(e?.message ?? "Error desconocido al cargar gastos.");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
 

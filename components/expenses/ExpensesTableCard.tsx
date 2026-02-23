@@ -6,12 +6,14 @@
 // - Llamar al endpoint real `/api/expenses` con:
 //      • from (YYYY-MM-DD)
 //      • to   (YYYY-MM-DD)
+//      • transaction_type ("expense" | "income")                🆕 (prep ingresos)
+//      • view ("full" | "analytics")                            🆕 (optimización payload)
 //      • category (opcional): id de categoría ("comida", "ropa", etc.)           ✅ legacy (single)
 //      • categories (opcional): CSV de categorías ("ocio,comida")               🆕 multi (solo tabla)
 // - Reutilizar filtros de período y rango:
 //      • PeriodFilter (today/week/7d/month/prev_month/range)
 //      • DateRangePicker cuando el usuario selecciona "range"
-// - Reutilizar filtro de categorías (CategoryFilter)
+// - Reutilizar filtro de categorías (MultiCategoryFilter)
 // - Mostrar overlay de loading mientras se cargan datos
 // - Mostrar mensaje de error si falla la API
 // - Mostrar tabla con scroll interno y filas clickeables para edición
@@ -35,6 +37,15 @@
 // - Convención: [] = "todas" (no se envía filtro).
 // - Si hay 1 o más seleccionadas: enviamos `categories=...` (CSV).
 // - Esto NO afecta otras pantallas: solo esta tabla manda `categories`.
+//
+// 🆕 REFACTOR /api/expenses:
+// - Esta tabla necesita el payload COMPLETO (view="full").
+// - Enviamos SIEMPRE transaction_type="expense" explícito para evitar drift
+//   cuando se activen ingresos (tab futuro).
+// - Usamos helper central `fetchExpenses()` para:
+//    • no armar querystring a mano
+//    • mantener manejo de errores uniforme
+//    • dejar consistente el contrato entre cards
 // -----------------------------------------------------------------------------
 
 "use client";
@@ -42,9 +53,6 @@
 import { useEffect, useMemo, useState } from "react";
 import PeriodFilter, { PeriodFilterValue } from "@/components/filters/PeriodFilter";
 import DateRangePicker from "@/components/filters/DateRangePicker";
-
-// ✅ Antes (single)
-// import CategoryFilter from "@/components/filters/CategoryFilter";
 
 // 🆕 Ahora (multi, solo tabla)
 import MultiCategoryFilter from "@/components/filters/MultiCategoryFilter";
@@ -70,6 +78,10 @@ import { initPeriodState } from "@/lib/dinvox/period-initializer";
 
 // 🆕 Contexto global (currency + language vienen del layout)
 import { useAppContext } from "@/lib/dinvox/app-context";
+
+// ✅ Helpers centralizados para /api/expenses (refactor)
+import { fetchExpenses } from "@/lib/dinvox/expenses-api";
+import type { ApiExpenseFull } from "@/lib/dinvox/expenses-api-types";
 
 // Props opcionales para permitir que otra pantalla (ej. Dashboard)
 // fije el rango inicial de fechas y la categoría al entrar a esta tarjeta.
@@ -163,47 +175,46 @@ export default function ExpensesTableCard({
   // =============================
   // EFECTO: cargar datos reales
   // =============================
+  // Nota:
+  // - Este componente necesita view="full" (tabla + nota + id).
+  // - Enviamos SIEMPRE transaction_type="expense" explícito para:
+  //    • evitar drift cuando se agreguen ingresos
+  //    • mantener consistencia entre cards
+  // - Multi-categorías:
+  //    • [] => no se envía filtro
+  //    • 1+ => categories=CSV
   useEffect(() => {
     // Si no hay rango definido, no hacemos nada
     if (!period.from || !period.to) return;
 
     const controller = new AbortController();
 
-    async function fetchExpenses() {
+    async function load() {
       try {
         setIsLoading(true);
         setLoadError(null);
 
-        const params = new URLSearchParams({
-          from: period.from,
-          to: period.to,
-        });
+        // ✅ Refactor: usar helper central (evita querystring manual)
+        const data = await fetchExpenses<ApiExpenseFull>(
+          {
+            from: period.from,
+            to: period.to,
+            view: "full",
+            transaction_type: "expense",
+            categories: categoryIds.length > 0 ? categoryIds : undefined,
+          },
+          { signal: controller.signal }
+        );
 
-        // 🆕 Multi-categorías:
-        // - [] => no enviar filtro (equivale a "todas")
-        // - 1+ => enviar CSV en `categories`
-        if (categoryIds.length > 0) {
-          params.set("categories", categoryIds.join(","));
-        }
-
-        const res = await fetch(`/api/expenses?${params.toString()}`, {
-          signal: controller.signal,
-        });
-
-        if (!res.ok) {
-          const body = await res.json().catch(() => null);
-          throw new Error(body?.error || `Error HTTP ${res.status}`);
-        }
-
-        const data: ApiExpense[] = await res.json();
-        setExpenses(data);
+        // ApiExpenseFull es compatible con ApiExpense (mismo shape actual)
+        setExpenses(data as ApiExpense[]);
       } catch (err: any) {
         if (err?.name === "AbortError") {
           // petición cancelada al cambiar filtros o desmontar componente
           return;
         }
         console.error("Error al cargar gastos:", err);
-        setLoadError(err.message || "Error al cargar los gastos.");
+        setLoadError(err?.message || "Error al cargar los gastos.");
       } finally {
         // Evita setState “tarde” cuando se aborta por cambio rápido de filtros
         if (!controller.signal.aborted) {
@@ -212,7 +223,7 @@ export default function ExpensesTableCard({
       }
     }
 
-    fetchExpenses();
+    load();
 
     return () => {
       controller.abort();

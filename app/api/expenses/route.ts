@@ -1,47 +1,76 @@
 // /api/expenses/route.ts
 // ---------------------------------------------------------
-// Endpoint para obtener los gastos del usuario autenticado.
+// Dinvox | /api/expenses
 //
-// Recibe:
-//   - from: YYYY-MM-DD  (inicio del rango)
-//   - to:   YYYY-MM-DD  (fin del rango)
-//   - transaction_type (opcional): "expense" | "income"      🆕 (preparación ingresos)
-//   - category (opcional): id de categoría ("comida", "ropa", etc.)            ✅ legacy (single)
-//   - categories (opcional): CSV de categorías ("ocio,comida,servicios")      🆕 multi (solo tabla)
+// Endpoint para obtener registros individuales (NO agregados)
+// del usuario autenticado.
 //
-// Prioridad de filtros:
+// CUÁNDO USAR ESTE ENDPOINT:
+// - Cards de gráficos que necesitan registros crudos por rango:
+//    • Tercios del mes (MonthThirdsCard)              -> view=analytics
+//    • Ritmo del mes (MonthRhythmCard)               -> view=analytics
+//    • Evolución mensual (MonthlyEvolution/LineChart)-> view=analytics
+// - Tabla de gastos (ExpensesTableCard)              -> view=full (default)
+//
+// CUÁNDO NO USAR:
+// - Resúmenes / banners / insights agregados
+//   (eso va por /api/summary y/o RPCs).
+//
+// ---------------------------------------------------------
+// PARAMS (query):
+// - from: YYYY-MM-DD  (inicio del rango)   [requerido]
+// - to:   YYYY-MM-DD  (fin del rango)      [requerido]
+//
+// - view (opcional): "full" | "analytics"                     🆕
+//    • default: "full"  (NO rompe consumers existentes)
+//    • "full": para tabla/edición -> incluye note e id
+//    • "analytics": para gráficos -> payload liviano:
+//         - NO incluye note
+//         - NO incluye id
+//
+// - transaction_type (opcional): "expense" | "income"         🆕 (prep ingresos)
+//    • default: "expense" (mantiene comportamiento actual)
+//    • Recomendación: la UI lo envía siempre para evitar drift.
+//
+// - category (opcional): id de categoría ("comida", "ropa", etc.)      ✅ legacy (single)
+// - categories (opcional): CSV de categorías ("ocio,comida,servicios") 🆕 multi (solo tabla)
+//
+// PRIORIDAD de filtros de categoría:
 //   1) categories (multi)  -> IN (...)
 //   2) category (single)   -> EQ (...)
 //   3) nada / "all"        -> sin filtro
 //
-// Usa `expense_date` (fecha local normalizada) para filtrar,
-// NO created_at (que es UTC y ya no debe usarse para UI).
+// FILTRADO POR FECHA:
+// - Usa `expense_date` (fecha local normalizada) para UI.
+// - NO usa created_at (UTC).
 //
-// Devuelve:
+// ---------------------------------------------------------
+// RESPUESTA:
+//
+// view=full (default):
 //   [
-//     {
-//       id,
-//       expense_date,
-//       category,
-//       amount,
-//       currency,
-//       note
-//     },
+//     { id, date, categoryId, amount, currency, note },
 //     ...
 //   ]
 //
-// Este endpoint es equivalente al de summary, pero devuelve
-// registros individuales, no agregados.
+// view=analytics:
+//   [
+//     { date, categoryId, amount, currency },
+//     ...
+//   ]
 //
-// 🆕 Nota (transaction_type):
-// - Por ahora la UI solo usa "expense".
-// - Dejamos el parámetro listo para el tab futuro (Ingresos),
-//   sin romper el comportamiento actual.
+// Nota currency:
+// - Hoy viene del perfil (tabla users) para mantener compatibilidad y
+//   porque varias cards lo usan como fallback.
+// - Más adelante, si quieres optimizar aún más, se puede omitir currency
+//   en view=analytics (si AppContext es 100% confiable).
 // ---------------------------------------------------------
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { guardCanMutate } from "@/lib/dinvox/guard-can-mutate";
+
+type ViewParam = "full" | "analytics";
 
 export async function GET(request: Request) {
   try {
@@ -53,8 +82,11 @@ export async function GET(request: Request) {
     const from = searchParams.get("from");
     const to = searchParams.get("to");
 
-    // 🆕 transaction_type (preparación ingresos)
-    // Default: "expense" para mantener comportamiento actual.
+    // view: default "full"
+    const viewParam = (searchParams.get("view") ?? "").trim() as ViewParam;
+    const view: ViewParam = viewParam === "analytics" ? "analytics" : "full";
+
+    // transaction_type: default "expense"
     const transactionTypeParam = (searchParams.get("transaction_type") ?? "").trim();
     const transaction_type =
       transactionTypeParam === "income" || transactionTypeParam === "expense"
@@ -65,7 +97,6 @@ export async function GET(request: Request) {
     const category = searchParams.get("category"); // opcional
 
     // 🆕 Filtro multi (CSV)
-    // Ej: "ocio,comida" -> ["ocio","comida"]
     const categoriesParam = searchParams.get("categories"); // opcional
     const categories =
       categoriesParam
@@ -98,7 +129,7 @@ export async function GET(request: Request) {
     }
 
     // -----------------------------------------
-    // 3) Obtener el perfil (id interno)
+    // 3) Obtener el perfil (id interno + currency)
     // -----------------------------------------
     const { data: profile, error: profileError } = await supabase
       .from("users")
@@ -118,13 +149,20 @@ export async function GET(request: Request) {
 
     // -----------------------------------------
     // 4) Construir query base
-    //     (filtrado por user_id + transaction_type + expense_date local)
     // -----------------------------------------
+    // Select dinámico según view:
+    // - full: incluye id + note (tabla/edición)
+    // - analytics: evita note e id (payload menor)
+    const selectClause =
+      view === "analytics"
+        ? "expense_date, category, amount"
+        : "id, expense_date, category, amount, note";
+
     let query = supabase
       .from("expenses")
-      .select("id, expense_date, category, amount, note")
+      .select(selectClause)
       .eq("user_id", appUserId)
-      .eq("transaction_type", transaction_type) // 🆕 evita mezclar gastos/ingresos
+      .eq("transaction_type", transaction_type)
       .gte("expense_date", from)
       .lte("expense_date", to)
       .order("expense_date", { ascending: false });
@@ -132,14 +170,6 @@ export async function GET(request: Request) {
     // -----------------------------------------
     // 5) Filtro opcional por categoría(s)
     // -----------------------------------------
-    // Prioridad:
-    // - Si viene "categories" (multi) y tiene valores => IN(...)
-    // - Si no, usamos "category" (single) si es distinto de "all"
-    //
-    // Nota:
-    // - Esto NO rompe el comportamiento actual, porque:
-    //   - si nadie envía "categories", todo funciona igual
-    // - Solo la tabla (multi filter) empezará a enviar "categories"
     if (categories.length > 0) {
       query = query.in("category", categories);
     } else if (category && category !== "all") {
@@ -159,16 +189,24 @@ export async function GET(request: Request) {
     }
 
     // -----------------------------------------
-    // 7) Mapear respuesta a un formato estable
+    // 7) Mapear respuesta estable según view
     // -----------------------------------------
-    const result = (expenses ?? []).map((exp) => ({
-      id: exp.id,
-      date: exp.expense_date, // YYYY-MM-DD local
-      categoryId: exp.category, // coincide con CATEGORIES
-      amount: exp.amount,
-      currency,
-      note: exp.note ?? "",
-    }));
+    const result =
+      view === "analytics"
+        ? (expenses ?? []).map((exp: any) => ({
+            date: exp.expense_date,
+            categoryId: exp.category,
+            amount: exp.amount,
+            currency,
+          }))
+        : (expenses ?? []).map((exp: any) => ({
+            id: exp.id,
+            date: exp.expense_date,
+            categoryId: exp.category,
+            amount: exp.amount,
+            currency,
+            note: exp.note ?? "",
+          }));
 
     return NextResponse.json(result, { status: 200 });
   } catch (err: any) {
@@ -194,24 +232,21 @@ export async function GET(request: Request) {
 // - Usa expense_date (fecha local ya normalizada en la UI).
 // - Marca source = "manual" y raw_text = "".
 // - Asocia user_id y auth_user_id automáticamente.
-// Devuelve el registro creado en el mismo formato que el GET:
-//   {
-//     id, date, categoryId, amount, currency, note
-//   }
+// Devuelve el registro creado en el mismo formato que el GET (view=full):
+//   { id, date, categoryId, amount, currency, note }
 //
-// 🆕 AUTORIZACIÓN (mutación):
+// AUTORIZACIÓN (mutación):
 // - En webapp permitimos ver datos aunque can_use=false,
 //   pero NO permitimos mutar (crear/editar/borrar).
 // - Por eso aquí validamos can_use via guardCanMutate() antes de insertar.
 //
-// 🆕 Nota (transaction_type):
+// Nota (transaction_type):
 // - Por ahora en webapp solo creamos "expense".
 // - Cuando agreguemos ingresos, este POST podrá aceptar "income" o
 //   se creará otro endpoint/modal específico.
 // -----------------------------------------------------------------------------
 export async function POST(request: Request) {
   try {
-    // 1) Leer y validar el body
     const body = await request.json().catch(() => null);
 
     if (!body || typeof body !== "object") {
@@ -228,7 +263,6 @@ export async function POST(request: Request) {
       note?: string;
     };
 
-    // Validar fecha básica: formato YYYY-MM-DD
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!date || typeof date !== "string" || !dateRegex.test(date)) {
       return NextResponse.json(
@@ -237,7 +271,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validar categoría
     if (!categoryId || typeof categoryId !== "string") {
       return NextResponse.json(
         { error: "Campo 'categoryId' es requerido." },
@@ -245,7 +278,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validar monto
     const amountNumber = Number(amount);
     if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
       return NextResponse.json(
@@ -254,13 +286,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2) 🆕 Guard centralizado (session + can_use)
+    // Guard centralizado (session + can_use)
     const guard = await guardCanMutate();
     if (!guard.ok) return guard.res;
 
     const { supabase, user } = guard;
 
-    // 3) Obtener perfil (id interno y moneda)
+    // Obtener perfil (id interno y moneda)
     const { data: profile, error: profileError } = await supabase
       .from("users")
       .select("id, currency")
@@ -280,19 +312,18 @@ export async function POST(request: Request) {
     const appUserId: string = profile.id;
     const currency: string = profile.currency ?? "COP";
 
-    // 4) Insertar el gasto en la tabla expenses
     const { data: inserted, error: insertError } = await supabase
       .from("expenses")
       .insert({
         user_id: appUserId,
         auth_user_id: user.id,
-        transaction_type: "expense", // 🆕 hoy forzado a "expense"
+        transaction_type: "expense", // hoy forzado a "expense"
         amount: amountNumber,
         category: categoryId,
         note: note ?? null,
         raw_text: "",
         source: "manual",
-        expense_date: date, // YYYY-MM-DD local
+        expense_date: date,
       })
       .select("id, expense_date, category, amount, note")
       .single();
@@ -307,11 +338,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // 5) Formato de respuesta alineado con el GET
     const responseBody = {
       id: inserted.id,
-      date: inserted.expense_date, // YYYY-MM-DD
-      categoryId: inserted.category, // ej: "comida"
+      date: inserted.expense_date,
+      categoryId: inserted.category,
       amount: inserted.amount,
       currency,
       note: inserted.note ?? "",
