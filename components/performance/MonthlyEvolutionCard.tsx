@@ -2,80 +2,72 @@
 // -----------------------------------------------------------------------------
 // Dinvox | Card: Evolución mensual (Capa 1C)
 //
-// Objetivo:
-// - Mostrar la evolución mes a mes del gasto (total o por categoría) en un rango:
-//    • últimos 6 meses
-//    • últimos 12 meses
-//    • year-to-date
+// ✅ Data-Driven (Performance Bundle)
+// - NO hace fetch.
+// - NO maneja loading/error.
+// - Recibe agregados mensuales desde PerformancePage (bundle).
+// - Adapta shape -> computeMonthlyEvolution -> render.
 //
-// Qué hace:
-// 1) Calcula el rango (from/to) en base al período.
-// 2) Descarga gastos reales con UNA llamada a `/api/expenses?from&to`.
-// 3) Normaliza al input mínimo de analytics (date, amount, categoryId).
-// 4) Calcula series e insights con `computeMonthlyEvolution()`.
-// 5) Renderiza filtro de categoría + headline + gráfico.
+// Notas clave:
+// - monthlyCategoryTotals viene agregado por (monthKey, categoryId).
+// - computeMonthlyEvolution espera date "YYYY-MM-DD" -> usamos `${monthKey}-01`.
+// - Validamos monthKey y categoryId para evitar basura que rompa charts.
 //
-// 🆕 Optimización (API view):
-// - Esta card NO necesita id ni note.
-// - Ahora pide `view=analytics` para reducir payload.
-// - Además envía `transaction_type=expense` explícito para evitar drift cuando se
-//   activen ingresos.
-// - Respuesta esperada (view=analytics):
-//    [{ date, categoryId, amount, currency }, ...]
-//
-// Moneda / idioma:
+// Moneda/idioma:
 // - Fuente de verdad: AppContext (layout).
-// - Respaldo: API (primer gasto) -> fallbacks -> default.
-//
-// Fetch:
-// - Usa AbortController para evitar race conditions (cambio de período/unmount).
-// - Usa helper central `fetchExpenses()` (refactor /api/expenses).
+// - Respaldo: fallbacks.
 // -----------------------------------------------------------------------------
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { AnalysisPeriodValue } from "@/components/filters/PeriodFilter";
 import CategoryFilter from "@/components/filters/CategoryFilter";
 import { CATEGORIES, type CategoryId } from "@/lib/dinvox/categories";
-import {
-  getMonthStartFromMonthKey,
-  getMonthEndFromMonthKey,
-  shiftMonthKey,
-  getMonthKeyFromDate,
-} from "@/lib/analytics/dates";
 import {
   computeMonthlyEvolution,
   type ExpenseForEvolution,
 } from "@/lib/analytics/evolution";
 import MonthlyEvolutionLineChart from "@/components/performance/MonthlyEvolutionLineChart";
 
-// ✅ helper central
+// ✅ helper central (moneda + decimales + locale)
 import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
 
 // ✅ contexto global (layout)
 import { useAppContext } from "@/lib/dinvox/app-context";
 
-// ✅ Helpers centralizados para /api/expenses (refactor)
-import { fetchExpenses } from "@/lib/dinvox/expenses-api";
-import type { ApiExpenseAnalytics } from "@/lib/dinvox/expenses-api-types";
-
 // -----------------------
 // Props
 // -----------------------
+
+type MonthlyCategoryTotalRow = {
+  monthKey: string; // "YYYY-MM"
+  categoryId: string;
+  total: number;
+  txCount: number;
+};
+
 type MonthlyEvolutionCardProps = {
   period: Extract<
     AnalysisPeriodValue,
     "last_6_months" | "last_12_months" | "year_to_date"
   >;
+
+  /**
+   * 🆕 Data obligatoria desde el padre (bundle)
+   * Rango recomendado: últimos 12 meses (incluye mes en curso).
+   */
+  monthlyCategoryTotals: MonthlyCategoryTotalRow[];
+
   fallbackCurrency?: string;
   fallbackLanguage?: string;
   embedded?: boolean;
 };
 
 // -----------------------
-// Utils
+// Utils UI
 // -----------------------
+
 function formatPct(pct: number) {
   const sign = pct > 0 ? "+" : "";
   return `${sign}${pct.toFixed(0)}%`;
@@ -85,142 +77,85 @@ function isCategoryId(x: string): x is CategoryId {
   return x in CATEGORIES;
 }
 
+function isMonthKey(x: string): boolean {
+  return /^\d{4}-\d{2}$/.test(x);
+}
+
 export default function MonthlyEvolutionCard({
   period,
+  monthlyCategoryTotals,
   fallbackCurrency = "COP",
   fallbackLanguage = "es-CO",
   embedded = false,
 }: MonthlyEvolutionCardProps) {
-  // ✅ Hook SIEMPRE se llama (regla de hooks)
+  // ✅ Fuente de verdad para moneda/idioma
   const { currency: ctxCurrency, language: ctxLanguage } = useAppContext();
 
-  // Datos crudos (para moneda real si existe)
-  // 🆕 Con view=analytics ya no viene id/note, pero sí viene currency.
-  const [apiExpenses, setApiExpenses] = useState<ApiExpenseAnalytics[]>([]);
-
-  // Input mínimo para analytics
-  const [expenses, setExpenses] = useState<ExpenseForEvolution[]>([]);
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Categoría seleccionada (UI)
+  // ⚠️ CategoryFilter trabaja con string -> mantenemos state como string|"all"
   const [category, setCategory] = useState<string | "all">("all");
-
-  // -----------------------
-  // Rango from / to
-  // -----------------------
-  // Nota: no lo memorizamos con [] porque en sesiones largas se queda “congelado”.
-  const today = new Date();
-
-  const currentMonthKey = useMemo(() => getMonthKeyFromDate(today), [today]);
-
-  const fromMonthKey = useMemo(() => {
-    if (!currentMonthKey) return null;
-
-    if (period === "last_12_months") return shiftMonthKey(currentMonthKey, -11);
-    if (period === "last_6_months") return shiftMonthKey(currentMonthKey, -5);
-
-    // year_to_date
-    return `${today.getFullYear()}-01`;
-  }, [period, currentMonthKey, today]);
-
-  const from = useMemo(
-    () => (fromMonthKey ? getMonthStartFromMonthKey(fromMonthKey) : null),
-    [fromMonthKey]
-  );
-
-  const to = useMemo(
-    () => (currentMonthKey ? getMonthEndFromMonthKey(currentMonthKey) : null),
-    [currentMonthKey]
-  );
-
-  // -----------------------
-  // Color de la línea (si filtras por categoría)
-  // - Si es "all" o algo inválido, usamos blanco.
-  // - Si es categoría válida, tomamos color de taxonomía.
-  // -----------------------
-  const lineColor = useMemo(() => {
-    if (category === "all") return "rgba(255,255,255,0.90)";
-    if (!isCategoryId(category)) return "rgba(255,255,255,0.90)";
-    return CATEGORIES[category].color;
-  }, [category]);
-
-  // -----------------------
-  // Fetch (1 sola llamada)
-  // -----------------------
-  // 🆕 Refactor /api/expenses:
-  // - view=analytics (payload mínimo)
-  // - transaction_type=expense explícito
-    useEffect(() => {
-    // ✅ aquí garantizamos strings
-    if (!from || !to) return;
-
-    const controller = new AbortController();
-
-    async function load() {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const data = await fetchExpenses<ApiExpenseAnalytics>(
-          {
-            from: String(from), // ✅ ya es string, pero así TS queda feliz
-            to: String(to),
-            view: "analytics",
-            transaction_type: "expense",
-          },
-          { signal: controller.signal }
-        );
-
-        const safe = Array.isArray(data) ? data : [];
-
-        setApiExpenses(safe);
-
-        setExpenses(
-          safe.map((e) => ({
-            date: e.date,
-            amount: e.amount,
-            categoryId: e.categoryId,
-          }))
-        );
-      } catch (e: any) {
-        if (e?.name === "AbortError") return;
-        setError(e?.message ?? "Error desconocido");
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    }
-
-    load();
-    return () => controller.abort();
-  }, [from, to]);
 
   // -----------------------
   // Moneda + language (source of truth)
   // -----------------------
-  // currency: AppContext -> API(primer gasto) -> fallback -> default
-  const currency = useMemo(() => {
-    const apiCurrency = apiExpenses?.[0]?.currency?.toUpperCase?.();
+  const currency =
+    ctxCurrency?.toUpperCase?.() ??
+    fallbackCurrency?.toUpperCase?.() ??
+    "COP";
 
-    return (
-      ctxCurrency?.toUpperCase?.() ??
-      apiCurrency ??
-      fallbackCurrency?.toUpperCase?.() ??
-      "COP"
-    );
-  }, [ctxCurrency, apiExpenses, fallbackCurrency]);
-
-  // language: AppContext -> fallback -> default (no uppercase)
   const language = ctxLanguage ?? fallbackLanguage ?? "es-CO";
+
+  // -----------------------
+  // categoryId seguro para analytics
+  // -----------------------
+  const categoryIdForAnalytics: CategoryId | "all" = useMemo(() => {
+    if (category === "all") return "all";
+    return isCategoryId(category) ? category : "all";
+  }, [category]);
 
   // -----------------------
   // Copy dinámico
   // -----------------------
   const categoryLabel = useMemo(() => {
-    if (category === "all") return null;
-    return isCategoryId(category) ? CATEGORIES[category].label : null;
-  }, [category]);
+    if (categoryIdForAnalytics === "all") return null;
+    return CATEGORIES[categoryIdForAnalytics]?.label ?? null;
+  }, [categoryIdForAnalytics]);
+
+  // -----------------------
+  // Color de la línea (si filtras por categoría)
+  // -----------------------
+  const lineColor = useMemo(() => {
+    if (categoryIdForAnalytics === "all") return "rgba(255,255,255,0.90)";
+    return CATEGORIES[categoryIdForAnalytics]?.color ?? "rgba(255,255,255,0.90)";
+  }, [categoryIdForAnalytics]);
+
+  // -----------------------
+  // Adaptación: agregados por mes -> input de analytics
+  // - Validamos monthKey y categoryId.
+  // - Fabricamos date `${monthKey}-01`.
+  // -----------------------
+  const expenses: ExpenseForEvolution[] = useMemo(() => {
+    const rows = Array.isArray(monthlyCategoryTotals)
+      ? monthlyCategoryTotals
+      : [];
+
+    return rows
+      .map((r) => {
+        const monthKey = String(r.monthKey ?? "");
+        const rawCategory = String(r.categoryId ?? "").toLowerCase();
+        const amount = Number(r.total);
+
+        if (!isMonthKey(monthKey)) return null;
+        if (!isCategoryId(rawCategory)) return null;
+        if (!Number.isFinite(amount)) return null;
+
+        return {
+          date: `${monthKey}-01`,
+          amount,
+          categoryId: rawCategory, // ✅ aquí ya es CategoryId por el guard
+        };
+      })
+      .filter((e): e is ExpenseForEvolution => e !== null);
+  }, [monthlyCategoryTotals]);
 
   // -----------------------
   // Analytics
@@ -228,15 +163,10 @@ export default function MonthlyEvolutionCard({
   const evolution = useMemo(() => {
     return computeMonthlyEvolution({
       expenses,
-      period:
-        period === "year_to_date"
-          ? "year_to_date"
-          : period === "last_12_months"
-          ? "last_12_months"
-          : "last_6_months",
-      categoryId: category,
+      period,
+      categoryId: categoryIdForAnalytics,
     });
-  }, [expenses, period, category]);
+  }, [expenses, period, categoryIdForAnalytics]);
 
   // -----------------------
   // Headline (comparación último mes cerrado vs anterior)
@@ -245,12 +175,9 @@ export default function MonthlyEvolutionCard({
     const hc = evolution.headlineComparison;
     if (!hc) return null;
 
-    const currentLabel = hc.currentLabel ?? "Último mes cerrado";
-    const prevLabel = hc.prevLabel ?? "mes anterior";
-
     return {
-      currentLabel,
-      prevLabel,
+      currentLabel: hc.currentLabel ?? "Último mes cerrado",
+      prevLabel: hc.prevLabel ?? "mes anterior",
       currentTotal: hc.currentTotal,
       deltaPct: hc.deltaPct ?? null,
     };
@@ -318,19 +245,14 @@ export default function MonthlyEvolutionCard({
         )}
       </div>
 
-      {loading && <p className="text-sm text-white/70">Cargando…</p>}
-      {!loading && error && <p className="text-sm text-red-300">{error}</p>}
-
-      {!loading && !error && (
-        <MonthlyEvolutionLineChart
-          series={evolution.series}
-          monthDeltaPctByMonthKey={evolution.monthDeltaPctByMonthKey}
-          inProgressMonthKey={evolution.inProgressMonthKey}
-          currency={currency}
-          language={language}
-          lineColor={lineColor}
-        />
-      )}
+      <MonthlyEvolutionLineChart
+        series={evolution.series}
+        monthDeltaPctByMonthKey={evolution.monthDeltaPctByMonthKey}
+        inProgressMonthKey={evolution.inProgressMonthKey}
+        currency={currency}
+        language={language}
+        lineColor={lineColor}
+      />
     </div>
   );
 }

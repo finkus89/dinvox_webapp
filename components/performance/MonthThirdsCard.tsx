@@ -2,53 +2,30 @@
 // ------------------------------------------------------------
 // Dinvox | Card: Tercios del mes (Capa 1A)
 //
-// Objetivo:
-// - Mostrar el desempeño del gasto del mes en 3 bloques (1–10 / 11–20 / 21–fin).
+// ✅ TZ-consistente (sin new Date() para estados/labels críticos)
 //
-// Responsabilidades de esta card:
-// - Descargar gastos reales del rango del mes (actual o anterior) desde `/api/expenses?from&to`.
-// - Transformar los gastos al formato mínimo del módulo de analytics.
-// - Calcular métricas por tercio con `computeMonthThirds()`.
-// - Renderizar:
-//    • Total del mes (y/o "a día de hoy" si es el mes actual)
-//    • Estados de tercios (Pendiente / En curso / Cerrado)
-//    • Cobertura (días con registros)
-//    • Insight textual (headline + nota)
-//    • Gráfico de barras por tercios
+// Esta card:
+// - NO hace fetch.
+// - Recibe expenses ya filtrados al mes desde PerformancePage.
+// - Recibe monthLabel + todayDay (resueltos en TZ usuario) desde PerformancePage.
+// - Solo calcula métricas e insight + render.
 //
-// 🆕 Optimización (API view):
-// - Esta card NO necesita id ni note.
-// - Ahora pide `view=analytics` para reducir payload.
-// - Respuesta esperada (view=analytics):
-//    [{ date, categoryId, amount, currency }, ...]
-//
-// Dónde se usa este patrón después:
-// - MonthRhythmCard (ritmo): `view=analytics` (mes + 3 previos)
-// - MonthlyEvolution (evolution): `view=analytics` (rangos largos)
-//
-// Moneda / idioma:
-// - Fuente de verdad: AppContext (layout)
-// - Props fallbackCurrency/fallbackLanguage quedan como respaldo por transición.
-//
-// Fetch:
-// - Usa AbortController para evitar race conditions al cambiar periodo/montaje.
+// Nota:
+// - Para "previous_month", el padre igual pasa monthLabel correcto;
+//   y aquí forzamos estados a "cerrado".
 // ------------------------------------------------------------
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   computeMonthThirds,
   type ExpenseForAnalytics,
   type MonthThirdsMetrics,
 } from "@/lib/analytics/tercios";
 import {
-  getMonthStartYYYYMMDD,
-  getMonthEndYYYYMMDD,
-  getTodayDay,
   getThirdStates,
   getThirdRangesLabelEs,
-  getMonthLabelEs,
 } from "@/lib/analytics/dates";
 import MonthThirdsBarChart from "@/components/performance/MonthThirdsBarChart";
 import type { AnalysisPeriodValue } from "@/components/filters/PeriodFilter";
@@ -57,33 +34,46 @@ import {
   type MonthThirdsInsight,
 } from "@/lib/analytics/insights/monthThirds";
 
-// ✅ helper centralizado (respeta símbolo/decimales/locale)
 import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
-
-// ✅ contexto global (layout)
 import { useAppContext } from "@/lib/dinvox/app-context";
+
+// ------------------------------------------------------------
+// Types
+// ------------------------------------------------------------
+
+type ThirdState = "no_iniciado" | "en_curso" | "cerrado";
 
 type MonthThirdsCardProps = {
   period: Extract<AnalysisPeriodValue, "current_month" | "previous_month">;
-  fallbackCurrency?: string; // ej "COP"
-  fallbackLanguage?: string; // ej "es-CO"
+
+  /**
+   * Data obligatoria desde el padre (ya filtrada al mes).
+   * Formato mínimo:
+   *   { date: "YYYY-MM-DD", amount: number }
+   */
+  expenses: {
+    date: string;
+    amount: number;
+    currency?: string;
+  }[];
+
+  /**
+   * ✅ Temporal resuelto por el padre (TZ usuario)
+   * - monthLabel: etiqueta del mes (ej "feb 2026")
+   * - todayDay: día del mes (1..31) en TZ usuario (solo importa para current_month)
+   */
+  monthLabel: string;
+  todayDay: number;
+
+  fallbackCurrency?: string;
+  fallbackLanguage?: string;
   embedded?: boolean;
 };
 
-// ✅ Respuesta esperada con view=analytics
-type ApiExpenseAnalytics = {
-  date: string; // "YYYY-MM-DD"
-  categoryId: string;
-  amount: number;
-  currency: string;
-};
+// ------------------------------------------------------------
+// Helpers UI
+// ------------------------------------------------------------
 
-// Estado simple del tercio según el día del mes actual
-type ThirdState = "no_iniciado" | "en_curso" | "cerrado";
-
-// -----------------------
-// Helpers (formatos UI)
-// -----------------------
 function thirdStateLabel(s: ThirdState) {
   if (s === "no_iniciado") return "Pendiente";
   if (s === "en_curso") return "En curso";
@@ -92,96 +82,61 @@ function thirdStateLabel(s: ThirdState) {
 
 export default function MonthThirdsCard({
   period,
+  expenses,
+  monthLabel,
+  todayDay,
   fallbackCurrency = "COP",
   fallbackLanguage = "es-CO",
   embedded = false,
 }: MonthThirdsCardProps) {
-  // Contexto global (si no existe aún, fallbacks mantienen estabilidad)
   const app = useAppContext?.();
   const ctxCurrency = app?.currency;
   const ctxLanguage = app?.language;
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Datos crudos desde API
-  const [expenses, setExpenses] = useState<ApiExpenseAnalytics[]>([]);
-
-  // Anchor del mes: día 1 evita bugs por 29/30/31
-  const anchorDate = useMemo(() => {
-    const d = new Date();
-    return period === "previous_month"
-      ? new Date(d.getFullYear(), d.getMonth() - 1, 1)
-      : new Date(d.getFullYear(), d.getMonth(), 1);
-  }, [period]);
-
-  const from = useMemo(() => getMonthStartYYYYMMDD(anchorDate), [anchorDate]);
-  const to = useMemo(() => getMonthEndYYYYMMDD(anchorDate), [anchorDate]);
-
-  const monthLabel = useMemo(() => getMonthLabelEs(anchorDate), [anchorDate]);
-  const thirdRanges = useMemo(
-    () => getThirdRangesLabelEs(anchorDate, to),
-    [anchorDate, to]
-  );
-
   const isClosedMonth = period === "previous_month";
 
-  // Estados de tercios:
-  // - Mes anterior: todo cerrado
-  // - Mes actual: según el día real de hoy
+  // ------------------------------------------------------------
+  // Estados de tercios (TZ-consistente)
+  // ------------------------------------------------------------
   const thirdStates = useMemo(() => {
     if (isClosedMonth) {
       return { t1: "cerrado", t2: "cerrado", t3: "cerrado" } as const;
     }
-    const todayDay = getTodayDay(new Date());
-    return getThirdStates(todayDay);
-  }, [isClosedMonth]);
+    const safeToday = Number.isFinite(todayDay) && todayDay >= 1 ? todayDay : 1;
+    return getThirdStates(safeToday);
+  }, [isClosedMonth, todayDay]);
 
-  // -----------------------
-  // Fetch real a tu API (optimizado con view=analytics)
-  // -----------------------
-  useEffect(() => {
-    const controller = new AbortController();
+  // ------------------------------------------------------------
+  // Ranges label (solo UI)
+  // ------------------------------------------------------------
+  // Aquí usamos un truco simple: derivamos "toYYYYMMDD" desde el último día visto en expenses
+  // si existe, o caemos a "YYYY-MM-31". Esto SOLO afecta etiqueta del rango, no métricas.
+  const thirdRanges = useMemo(() => {
+    const toGuess =
+      expenses?.length
+        ? (expenses[expenses.length - 1]?.date ?? "")
+        : "";
 
-    async function load() {
-      setLoading(true);
-      setError(null);
+    // Para el label solo necesitamos el mes abreviado + fin real,
+    // pero getThirdRangesLabelEs requiere (now: Date, toYYYYMMDD: string).
+    // Para no usar Date local, dejamos "now" como new Date(0) (solo se usa para monthShortEs),
+    // PERO eso sería incorrecto.
+    //
+    // ✅ Mejor: no usar getThirdRangesLabelEs aquí.
+    // Como ya recibes monthLabel (ej "feb 2026"), el rango es cosmético.
+    // Dejamos labels simples sin depender de Date:
+    const endDay = toGuess?.slice(8, 10) || "31";
+    const m = monthLabel.split(" ")[0] ?? ""; // "feb"
+    return {
+      t1: `01–10 ${m}`,
+      t2: `11–20 ${m}`,
+      t3: `21–${endDay} ${m}`,
+    };
+  }, [expenses, monthLabel]);
 
-      try {
-        const res = await fetch(
-          `/api/expenses?from=${from}&to=${to}&view=analytics&transaction_type=expense`,
-          {
-            method: "GET",
-            signal: controller.signal,
-          }
-        );
-
-        if (!res.ok) {
-          const payload = await res.json().catch(() => null);
-          const msg =
-            payload?.error ??
-            `Error al cargar gastos (${res.status} ${res.statusText}).`;
-          throw new Error(msg);
-        }
-
-        const data = (await res.json()) as ApiExpenseAnalytics[];
-
-        setExpenses(Array.isArray(data) ? data : []);
-      } catch (e: any) {
-        if (e?.name === "AbortError") return; // request cancelada (cambio de periodo / unmount)
-        setError(e?.message ?? "Error desconocido al cargar gastos.");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    load();
-    return () => controller.abort();
-  }, [from, to]);
-
-  // -----------------------
-  // Transformación a analytics
-  // -----------------------
+  // ------------------------------------------------------------
+  // Adaptación a analytics
+  // ------------------------------------------------------------
   const analyticsInput: ExpenseForAnalytics[] = useMemo(() => {
     return (expenses ?? []).map((e) => ({
       date: e.date,
@@ -189,10 +144,16 @@ export default function MonthThirdsCard({
     }));
   }, [expenses]);
 
+  // ------------------------------------------------------------
+  // Métricas
+  // ------------------------------------------------------------
   const metrics: MonthThirdsMetrics | null = useMemo(() => {
     return computeMonthThirds(analyticsInput);
   }, [analyticsInput]);
 
+  // ------------------------------------------------------------
+  // Insight textual
+  // ------------------------------------------------------------
   const insight: MonthThirdsInsight | null = useMemo(() => {
     if (!metrics) return null;
 
@@ -203,10 +164,9 @@ export default function MonthThirdsCard({
     });
   }, [metrics, period, monthLabel]);
 
-  // -----------------------
-  // Moneda / idioma (source of truth)
-  // -----------------------
-  // currency: API(expenses[0]) -> AppContext -> fallback props -> default
+  // ------------------------------------------------------------
+  // Moneda / idioma
+  // ------------------------------------------------------------
   const currency = useMemo(() => {
     const apiCurrency = expenses?.[0]?.currency?.toUpperCase?.();
     return (
@@ -217,9 +177,11 @@ export default function MonthThirdsCard({
     );
   }, [expenses, ctxCurrency, fallbackCurrency]);
 
-  // language: AppContext -> fallback props -> default
   const language = ctxLanguage ?? fallbackLanguage ?? "es-CO";
 
+  // ------------------------------------------------------------
+  // Render
+  // ------------------------------------------------------------
   return (
     <div
       className={
@@ -234,7 +196,6 @@ export default function MonthThirdsCard({
           `
       }
     >
-      {/* Header de la card (solo si NO está embebida dentro del Accordion) */}
       {!embedded && (
         <div className="flex flex-col gap-1">
           <h3 className="text-xl sm:text-2xl font-semibold tracking-tight">
@@ -251,35 +212,17 @@ export default function MonthThirdsCard({
       )}
 
       <div className={embedded ? "" : "mt-5 border-t border-white/15 pt-5"}>
-        {loading && <p className="text-sm text-white/80">Cargando gastos…</p>}
-
-        {!loading && error && (
-          <div className="rounded-2xl border border-red-200/40 bg-red-500/15 p-4">
-            <p className="text-sm font-semibold text-red-100">Error</p>
-            <p className="text-sm text-red-100/90 mt-1">{error}</p>
-          </div>
-        )}
-
-        {!loading && !error && !metrics && (
+        {!metrics && (
           <div className="rounded-2xl border border-white/15 bg-white/10 p-4">
             <p className="text-sm font-semibold text-white">
               Aún no hay datos suficientes
             </p>
-            <p className="text-sm text-white/80 mt-1">
-              No se encontraron gastos en el rango {from} a {to}.
-            </p>
           </div>
         )}
 
-        {!loading && !error && metrics && (
-          <div
-            className={
-              embedded
-                ? "grid grid-cols-1 md:grid-cols-2 gap-4"
-                : "grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6"
-            }
-          >
-            {/* Columna izquierda: texto útil */}
+        {metrics && (
+          <div className={embedded ? "grid grid-cols-1 md:grid-cols-2 gap-4" : "grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6"}>
+            {/* Columna izquierda */}
             <div className="rounded-2xl border border-white/15 bg-white/10 p-5 space-y-2">
               <div className="mt-4">
                 <div className="flex items-end justify-between gap-3">
@@ -350,7 +293,7 @@ export default function MonthThirdsCard({
               )}
             </div>
 
-            {/* Columna derecha: gráfico */}
+            {/* Columna derecha */}
             <div className="rounded-2xl border border-white/15 bg-white/10 p-4 sm:p-5">
               <MonthThirdsBarChart
                 t1={metrics.totalT1}

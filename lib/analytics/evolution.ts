@@ -18,6 +18,7 @@
 // - Si no hay suficientes meses cerrados, headlineComparison = null.
 // -----------------------------------------------------------------------------
 
+import type { CategoryId } from "@/lib/dinvox/categories";
 import {
   getMonthKeyFromYYYYMMDD,
   getMonthKeyFromDate,
@@ -30,22 +31,24 @@ import {
 // Tipos de entrada (alineados a lo mínimo necesario)
 // -----------------------------------------------------------------------------
 
-export type MonthlyEvolutionPeriod = "last_12_months" | "last_6_months" | "year_to_date";
+export type MonthlyEvolutionPeriod =
+  | "last_12_months"
+  | "last_6_months"
+  | "year_to_date";
 
 export type ExpenseForEvolution = {
   id?: string;
-  date: string;        // "YYYY-MM-DD"
-  categoryId: string;
+  date: string; // "YYYY-MM-DD"
+  categoryId: CategoryId;
   amount: number;
-  currency?: string;   // viene del API (ej "COP")
+  currency?: string; // viene del API (ej "COP")
   note?: string;
 };
 
-
 export type MonthlyPoint = {
   monthKey: string; // "YYYY-MM"
-  label: string;    // "Ene 2026"
-  total: number;    // total del mes (0 si no hubo gastos)
+  label: string; // "Ene 2026"
+  total: number; // total del mes (0 si no hubo gastos)
 };
 
 // Comparación entre 2 meses (usado para el “headline” fijo)
@@ -53,9 +56,9 @@ export type MonthToMonthComparison = {
   currentMonthKey: string;
   previousMonthKey: string;
 
-  // 🔹 nuevos (para UI)
-  currentLabel: string;   // ej: "Dic 2025"
-  prevLabel: string;      // ej: "Nov 2025"
+  // para UI
+  currentLabel: string; // ej: "Dic 2025"
+  prevLabel: string; // ej: "Nov 2025"
 
   currentTotal: number;
   previousTotal: number;
@@ -103,7 +106,7 @@ function isValidMonthKey(mk: string): boolean {
 
 function groupMonthlyTotals(
   expenses: ExpenseForEvolution[],
-  categoryId: string | "all"
+  categoryId: CategoryId | "all"
 ): Record<string, number> {
   const totals: Record<string, number> = {};
 
@@ -111,7 +114,7 @@ function groupMonthlyTotals(
     if (!e?.date) continue;
     if (typeof e.amount !== "number" || !Number.isFinite(e.amount)) continue;
 
-    // Filtro de categoría (mismo comportamiento que tabla: "all" = todo)
+    // Filtro de categoría ("all" = todo)
     if (categoryId !== "all" && e.categoryId !== categoryId) continue;
 
     const mk = getMonthKeyFromYYYYMMDD(e.date);
@@ -191,7 +194,7 @@ function computeMonthDeltaPctMap(
     // No hay mes anterior
     if (!prev) continue;
 
-    // Si el mes anterior es el mes en curso (caso raro, pero por seguridad)
+    // Si el mes anterior es el mes en curso (seguridad)
     if (prev.monthKey === inProgressMonthKey) continue;
 
     // Porcentaje seguro (si prev.total=0 -> null)
@@ -210,19 +213,19 @@ function computeMonthDeltaPctMap(
 // Construye la serie mensual + comparaciones (headline + tooltip deltas).
 //
 // Parámetros:
-// - expenses: gastos ya cargados (desde /api/expenses)
-// - period: "last_3_months" | "last_6_months" | "year_to_date"
+// - expenses: gastos ya cargados (desde /api/expenses o agregados por mes)
+// - period: "last_12_months" | "last_6_months" | "year_to_date"
 // - categoryId: "all" o un id de categoría (CategoryId)
 // - today: Date opcional (útil para tests); default = new Date()
 export function computeMonthlyEvolution(args: {
   expenses: ExpenseForEvolution[];
   period: MonthlyEvolutionPeriod;
-  categoryId: string | "all";
+  categoryId: CategoryId | "all";
   today?: Date;
 }): MonthlyEvolutionResult {
   const today = args.today ?? new Date();
 
-  // Mes en curso = mes actual del calendario (regla A confirmada)
+  // Mes en curso = mes actual del calendario
   const inProgressMonthKey = getMonthKeyFromDate(today);
 
   // Lista de meses del rango (incluye mes en curso)
