@@ -121,7 +121,7 @@ export default function MonthlyEvolutionLineChart({
         {delta != null && prevLabel && (
           <div style={{ opacity: 0.85, marginTop: 4 }}>
             vs {prevLabel}: {delta > 0 ? "+" : ""}
-            {delta.toFixed(0)}%
+            {delta.toFixed(1)}%
           </div>
         )}
 

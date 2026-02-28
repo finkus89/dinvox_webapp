@@ -8,14 +8,19 @@
 // - Recibe agregados mensuales desde PerformancePage (bundle).
 // - Adapta shape -> computeMonthlyEvolution -> render.
 //
-// Notas clave:
-// - monthlyCategoryTotals viene agregado por (monthKey, categoryId).
-// - computeMonthlyEvolution espera date "YYYY-MM-DD" -> usamos `${monthKey}-01`.
-// - Validamos monthKey y categoryId para evitar basura que rompa charts.
+// ✅ Cambio interno (sin tocar el gráfico):
+// - Insight pasa a builder dedicado (como Ritmo).
+// - Se agrega un bloque opcional de "drivers" por categoría:
+//   • Solo cuando category === "all"
+//   • Solo si existen categorías que cumplan el umbral (>= 8% del total del mes cerrado)
+//   • Top 2 suben / top 2 bajan por deltaAmount (dinero)
+// -----------------------------------------------------------------------------
 //
-// Moneda/idioma:
-// - Fuente de verdad: AppContext (layout).
-// - Respaldo: fallbacks.
+// ✅ Cambio de presentación (coherencia con Ritmo/Tercios):
+// - El gráfico ahora vive dentro de un panel (tarjeta interna), no suelto.
+// - Los "drivers" (top suben/bajan) ya NO son tarjetas dentro de tarjeta:
+//   quedan integrados en el mismo panel del insight.
+// - Layout: 2 filas (insight arriba, gráfico abajo), no 2 columnas.
 // -----------------------------------------------------------------------------
 
 "use client";
@@ -30,11 +35,11 @@ import {
 } from "@/lib/analytics/evolution";
 import MonthlyEvolutionLineChart from "@/components/performance/MonthlyEvolutionLineChart";
 
-// ✅ helper central (moneda + decimales + locale)
 import { formatMoney as formatMoneyUI } from "@/lib/dinvox/expenses-utils";
-
-// ✅ contexto global (layout)
 import { useAppContext } from "@/lib/dinvox/app-context";
+
+// ✅ nuevo: insight separado (headline + drivers)
+import { buildMonthlyEvolutionInsight } from "@/lib/analytics/insights/monthlyEvolution";
 
 // -----------------------
 // Props
@@ -53,10 +58,6 @@ type MonthlyEvolutionCardProps = {
     "last_6_months" | "last_12_months" | "year_to_date"
   >;
 
-  /**
-   * 🆕 Data obligatoria desde el padre (bundle)
-   * Rango recomendado: últimos 12 meses (incluye mes en curso).
-   */
   monthlyCategoryTotals: MonthlyCategoryTotalRow[];
 
   fallbackCurrency?: string;
@@ -70,7 +71,7 @@ type MonthlyEvolutionCardProps = {
 
 function formatPct(pct: number) {
   const sign = pct > 0 ? "+" : "";
-  return `${sign}${pct.toFixed(0)}%`;
+  return `${sign}${pct.toFixed(1)}%`;
 }
 
 function isCategoryId(x: string): x is CategoryId {
@@ -81,6 +82,20 @@ function isMonthKey(x: string): boolean {
   return /^\d{4}-\d{2}$/.test(x);
 }
 
+function formatSignedMoney(
+  value: number,
+  currency: string,
+  language: string
+): string {
+  if (value === 0) {
+    return formatMoneyUI(0, currency, language);
+  }
+
+  const sign = value > 0 ? "+" : "-";
+
+  return `${sign}${formatMoneyUI(Math.abs(value), currency, language)}`;
+}
+
 export default function MonthlyEvolutionCard({
   period,
   monthlyCategoryTotals,
@@ -88,14 +103,12 @@ export default function MonthlyEvolutionCard({
   fallbackLanguage = "es-CO",
   embedded = false,
 }: MonthlyEvolutionCardProps) {
-  // ✅ Fuente de verdad para moneda/idioma
   const { currency: ctxCurrency, language: ctxLanguage } = useAppContext();
 
-  // ⚠️ CategoryFilter trabaja con string -> mantenemos state como string|"all"
   const [category, setCategory] = useState<string | "all">("all");
 
   // -----------------------
-  // Moneda + language (source of truth)
+  // Moneda + language
   // -----------------------
   const currency =
     ctxCurrency?.toUpperCase?.() ??
@@ -105,7 +118,7 @@ export default function MonthlyEvolutionCard({
   const language = ctxLanguage ?? fallbackLanguage ?? "es-CO";
 
   // -----------------------
-  // categoryId seguro para analytics
+  // categoryId seguro
   // -----------------------
   const categoryIdForAnalytics: CategoryId | "all" = useMemo(() => {
     if (category === "all") return "all";
@@ -125,13 +138,13 @@ export default function MonthlyEvolutionCard({
   // -----------------------
   const lineColor = useMemo(() => {
     if (categoryIdForAnalytics === "all") return "rgba(255,255,255,0.90)";
-    return CATEGORIES[categoryIdForAnalytics]?.color ?? "rgba(255,255,255,0.90)";
+    return (
+      CATEGORIES[categoryIdForAnalytics]?.color ?? "rgba(255,255,255,0.90)"
+    );
   }, [categoryIdForAnalytics]);
 
   // -----------------------
-  // Adaptación: agregados por mes -> input de analytics
-  // - Validamos monthKey y categoryId.
-  // - Fabricamos date `${monthKey}-01`.
+  // Adaptación: agregados por mes -> input analytics
   // -----------------------
   const expenses: ExpenseForEvolution[] = useMemo(() => {
     const rows = Array.isArray(monthlyCategoryTotals)
@@ -151,14 +164,14 @@ export default function MonthlyEvolutionCard({
         return {
           date: `${monthKey}-01`,
           amount,
-          categoryId: rawCategory, // ✅ aquí ya es CategoryId por el guard
+          categoryId: rawCategory,
         };
       })
       .filter((e): e is ExpenseForEvolution => e !== null);
   }, [monthlyCategoryTotals]);
 
   // -----------------------
-  // Analytics
+  // Analytics (cálculo)
   // -----------------------
   const evolution = useMemo(() => {
     return computeMonthlyEvolution({
@@ -169,19 +182,20 @@ export default function MonthlyEvolutionCard({
   }, [expenses, period, categoryIdForAnalytics]);
 
   // -----------------------
-  // Headline (comparación último mes cerrado vs anterior)
+  // Insight (headline + drivers)
+  // - headline: igual que hoy
+  // - drivers: solo aplica si category === "all" y hay categorías que pasen umbral
   // -----------------------
-  const headline = useMemo(() => {
-    const hc = evolution.headlineComparison;
-    if (!hc) return null;
+  const insight = useMemo(() => {
+    return buildMonthlyEvolutionInsight(evolution, categoryIdForAnalytics);
+  }, [evolution, categoryIdForAnalytics]);
 
-    return {
-      currentLabel: hc.currentLabel ?? "Último mes cerrado",
-      prevLabel: hc.prevLabel ?? "mes anterior",
-      currentTotal: hc.currentTotal,
-      deltaPct: hc.deltaPct ?? null,
-    };
-  }, [evolution.headlineComparison]);
+  // -----------------------
+  // Render helpers drivers
+  // -----------------------
+  const showDrivers =
+    categoryIdForAnalytics === "all" &&
+    ((insight.topUp?.length ?? 0) > 0 || (insight.topDown?.length ?? 0) > 0);
 
   // -----------------------
   // Render
@@ -213,46 +227,143 @@ export default function MonthlyEvolutionCard({
               : "Cómo han sido tus gastos totales mes a mes."}
           </p>
         )}
-
-        {headline && (
-          <div className="rounded-xl border border-white/15 bg-white/10 p-3 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold text-white">
-                {headline.currentLabel} (último mes cerrado):
-              </span>
-
-              <span className="text-white/90">
-                {formatMoneyUI(headline.currentTotal, currency, language)}
-              </span>
-
-              <span className="text-white/60">vs {headline.prevLabel}</span>
-
-              {headline.deltaPct != null && (
-                <span
-                  className={`font-semibold ${
-                    headline.deltaPct > 0
-                      ? "text-red-400"
-                      : headline.deltaPct < 0
-                      ? "text-emerald-400"
-                      : "text-white/70"
-                  }`}
-                >
-                  {formatPct(headline.deltaPct)}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
-      <MonthlyEvolutionLineChart
-        series={evolution.series}
-        monthDeltaPctByMonthKey={evolution.monthDeltaPctByMonthKey}
-        inProgressMonthKey={evolution.inProgressMonthKey}
-        currency={currency}
-        language={language}
-        lineColor={lineColor}
-      />
+      {/* ✅ Layout coherente con Ritmo/Tercios: 2 filas (insight arriba, chart abajo) */}
+      <div className="flex flex-col gap-3">
+        {/* -----------------------
+            Fila 1: Insight + Drivers (mismo panel)
+           ----------------------- */}
+        <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+          {insight.headline ? (
+            <>
+              {/* --- Headline (igual que hoy) --- */}
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-semibold text-white">
+                  {insight.headline.currentLabel} (último mes cerrado):
+                </span>
+
+                <span className="text-white/90">
+                  {formatMoneyUI(
+                    insight.headline.currentTotal,
+                    currency,
+                    language
+                  )}
+                </span>
+
+                <span className="text-white/60">
+                  vs {insight.headline.prevLabel}
+                </span>
+
+                {insight.headline.deltaPct != null && (
+                  <span
+                    className={`font-semibold ${
+                      insight.headline.deltaPct > 0
+                        ? "text-red-400"
+                        : insight.headline.deltaPct < 0
+                        ? "text-emerald-400"
+                        : "text-white/70"
+                    }`}
+                  >
+                    {formatPct(insight.headline.deltaPct)}
+                  </span>
+                )}
+              </div>
+
+              {/* --- Drivers integrados (sin tarjetas internas) --- */}
+              {showDrivers && (
+                <div className="mt-3 border-t border-white/10 pt-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {/* Subieron */}
+                    {insight.topUp?.length > 0 && (
+                      <div>
+                        <div className="text-xs font-semibold text-white/85">
+                          Categorías que más subieron
+                        </div>
+
+                        <div className="mt-2 space-y-1.5">
+                          {insight.topUp.map((d, idx) => (
+                            <div
+                              key={`${d.categoryId}-${idx}`}
+                              className="flex items-center justify-between gap-3"
+                            >
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="text-base">
+                                  {d.emoji ?? "•"}
+                                </span>
+                                <span className="text-white/90">{d.label}</span>
+                              </div>
+
+                              <div className="text-sm font-semibold text-red-300">
+                                {formatSignedMoney(
+                                  d.deltaAmount,
+                                  currency,
+                                  language
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Bajaron */}
+                    {insight.topDown?.length > 0 && (
+                      <div>
+                        <div className="text-xs font-semibold text-white/85">
+                          Categorías que más bajaron
+                        </div>
+
+                        <div className="mt-2 space-y-1.5">
+                          {insight.topDown.map((d, idx) => (
+                            <div
+                              key={`${d.categoryId}-${idx}`}
+                              className="flex items-center justify-between gap-3"
+                            >
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="text-base">
+                                  {d.emoji ?? "•"}
+                                </span>
+                                <span className="text-white/90">{d.label}</span>
+                              </div>
+
+                              <div className="text-sm font-semibold text-emerald-300">
+                                {formatSignedMoney(
+                                  d.deltaAmount,
+                                  currency,
+                                  language
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-sm text-white/75">
+              No hay datos suficientes para calcular la evolución en este período.
+            </div>
+          )}
+        </div>
+
+        {/* -----------------------
+            Fila 2: Gráfico (encapsulado como los otros)
+           ----------------------- */}
+        <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+          <MonthlyEvolutionLineChart
+            series={evolution.series}
+            monthDeltaPctByMonthKey={evolution.monthDeltaPctByMonthKey}
+            inProgressMonthKey={evolution.inProgressMonthKey}
+            currency={currency}
+            language={language}
+            lineColor={lineColor}
+          />
+        </div>
+      </div>
     </div>
   );
 }

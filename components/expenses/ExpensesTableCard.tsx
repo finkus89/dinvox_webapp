@@ -441,7 +441,7 @@ export default function ExpensesTableCard({
         )}
 
         {hasData ? (
-          <div className="max-h-80 overflow-y-auto">
+          <div className="max-h-[60vh] md:max-h-[520px] overflow-y-auto overscroll-contain">
             <table className="min-w-[500px] md:min-w-full text-xs sm:text-sm">
               <thead className="sticky top-0 bg-slate-900/80 backdrop-blur border-b border-white/10">
                 <tr>

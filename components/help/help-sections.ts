@@ -321,6 +321,24 @@ Si no hay historial suficiente, el sistema muestra únicamente tu
 promedio diario de gasto hasta la fecha.
 Ese mes se usará luego como base inicial.
 
+📅 Mes actual vs mes anterior
+
+Cuando ves el mes actual, el ritmo se calcula hasta el día de hoy.
+
+Cuando ves un mes anterior, el análisis corresponde al mes completo
+(usando todos los días que tuvo ese mes).
+
+Esto permite comparar cómo se comportó tu gasto en el tiempo,
+independientemente de que algunos meses tengan 28, 30 o 31 días.
+
+📈 Ritmo vs Evolución mensual
+
+El Ritmo muestra la velocidad y distribución del gasto durante el mes.
+
+No compara totales mensuales.
+Por eso, su resultado puede diferir del análisis de
+Evolución mensual, que sí compara el gasto total entre meses.
+
 Importante:
 Este gráfico no es un presupuesto.
 No te dice cuánto deberías gastar.
@@ -352,6 +370,13 @@ Al tocar un punto del gráfico puedes ver:
 - La variación porcentual frente al mes anterior, cuando aplica.
 
 Esta vista es útil para identificar tendencias, detectar aumentos sostenidos y entender la evolución general de tus gastos sin entrar en el detalle diario.
+
+📊 Evolución vs Ritmo del mes
+
+La Evolución mensual compara el total gastado entre meses completos.
+El Ritmo del mes analiza cómo se distribuyó tu gasto dentro del mes, independientemente de cuántos días tenga.
+Por eso, ambos análisis pueden mostrar resultados diferentes:
+uno mide el total final y el otro el comportamiento en el tiempo.
   `,
 },
 
